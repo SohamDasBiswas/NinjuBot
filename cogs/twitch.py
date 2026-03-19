@@ -2,7 +2,6 @@ import discord
 from discord.ext import commands, tasks
 import aiohttp
 import os
-<<<<<<< HEAD
 from database import get_conn
 
 TWITCH_USERNAME = "sdb_darkninja"
@@ -51,22 +50,6 @@ def save_channel_ids(guild_id, ids):
           str(ids["viewers"]), str(ids["game"])))
     conn.commit()
     conn.close()
-=======
-import json
-
-TWITCH_USERNAME = "sdb_darkninja"
-DATA_FILE = "twitch_channels.json"
-
-def load_channel_ids():
-    if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, "r") as f:
-            return {int(k): v for k, v in json.load(f).items()}
-    return {}
-
-def save_channel_ids(data):
-    with open(DATA_FILE, "w") as f:
-        json.dump({str(k): v for k, v in data.items()}, f)
->>>>>>> d41d31c352c0ebf98ee13bfc9bc59b6ac02c8450
 
 class Twitch(commands.Cog):
     def __init__(self, bot):
@@ -91,19 +74,12 @@ class Twitch(commands.Cog):
     async def get_twitch_stats(self):
         client_id = os.getenv("TWITCH_CLIENT_ID")
         if not client_id:
-            return None, "❌ `TWITCH_CLIENT_ID` missing from `.env`."
+            return None, "❌ `TWITCH_CLIENT_ID` missing."
         if not self.access_token:
             self.access_token = await self.get_token()
         if not self.access_token:
-            return None, "❌ Could not get Twitch token. Check `.env`."
-<<<<<<< HEAD
-=======
-
->>>>>>> d41d31c352c0ebf98ee13bfc9bc59b6ac02c8450
-        headers = {
-            "Client-ID": client_id,
-            "Authorization": f"Bearer {self.access_token}"
-        }
+            return None, "❌ Could not get Twitch token."
+        headers = {"Client-ID": client_id, "Authorization": f"Bearer {self.access_token}"}
         try:
             async with aiohttp.ClientSession() as s:
                 resp = await s.get(f"https://api.twitch.tv/helix/users?login={TWITCH_USERNAME}", headers=headers)
@@ -112,22 +88,11 @@ class Twitch(commands.Cog):
                     return None, f"❌ Twitch user `{TWITCH_USERNAME}` not found."
                 user = user_data["data"][0]
                 user_id = user["id"]
-<<<<<<< HEAD
                 resp2 = await s.get(f"https://api.twitch.tv/helix/channels/followers?broadcaster_id={user_id}", headers=headers)
                 followers = (await resp2.json()).get("total", 0)
                 resp3 = await s.get(f"https://api.twitch.tv/helix/streams?user_login={TWITCH_USERNAME}", headers=headers)
                 stream_data = await resp3.json()
                 stream = stream_data["data"][0] if stream_data.get("data") else None
-=======
-
-                resp2 = await s.get(f"https://api.twitch.tv/helix/channels/followers?broadcaster_id={user_id}", headers=headers)
-                followers = (await resp2.json()).get("total", 0)
-
-                resp3 = await s.get(f"https://api.twitch.tv/helix/streams?user_login={TWITCH_USERNAME}", headers=headers)
-                stream_data = await resp3.json()
-                stream = stream_data["data"][0] if stream_data.get("data") else None
-
->>>>>>> d41d31c352c0ebf98ee13bfc9bc59b6ac02c8450
                 return {
                     "username": user["display_name"],
                     "followers": followers,
@@ -139,10 +104,6 @@ class Twitch(commands.Cog):
         except Exception as e:
             return None, f"❌ Twitch API error: {e}"
 
-<<<<<<< HEAD
-=======
-    # ── -twitchsetup [category_id] ────────────────────────────────────────────
->>>>>>> d41d31c352c0ebf98ee13bfc9bc59b6ac02c8450
     @commands.command(name="twitchsetup")
     @commands.has_permissions(administrator=True)
     async def twitch_setup(self, ctx, category_id: int = None):
@@ -150,24 +111,17 @@ class Twitch(commands.Cog):
         stats, error = await self.get_twitch_stats()
         if not stats:
             return await msg.edit(content=error)
-
         guild = ctx.guild
-<<<<<<< HEAD
-
-        # If channels already exist in DB and are still valid, just update
+        # If channels already exist and are valid, just update them
         if guild.id in self.channel_ids:
             ids = self.channel_ids[guild.id]
-            existing = all(guild.get_channel(v) is not None for v in ids.values())
-            if existing:
+            if all(guild.get_channel(v) is not None for v in ids.values()):
                 await self.do_update(stats)
                 return await msg.edit(content=None, embed=discord.Embed(
                     title="✅ Already Set Up!",
-                    description="Existing channels updated with latest stats. No new channels created.",
+                    description="Existing channels updated. No new channels created.",
                     color=0x9146FF
                 ))
-
-=======
->>>>>>> d41d31c352c0ebf98ee13bfc9bc59b6ac02c8450
         category = None
         if category_id:
             category = guild.get_channel(category_id)
@@ -175,74 +129,27 @@ class Twitch(commands.Cog):
                 return await msg.edit(content=f"❌ Category `{category_id}` not found.")
         if not category:
             category = await guild.create_category("📊 Twitch Analytics")
-
-<<<<<<< HEAD
         overwrite = {guild.default_role: discord.PermissionOverwrite(connect=False, view_channel=True)}
         followers_vc = await guild.create_voice_channel(f"🪻 | Followers : {stats['followers']:,}", category=category, overwrites=overwrite)
         status_vc    = await guild.create_voice_channel("🪻 | Status : 🔴 LIVE" if stats["is_live"] else "🪻 | Status : ⚫ Offline", category=category, overwrites=overwrite)
         viewers_vc   = await guild.create_voice_channel(f"🪻 | Viewers : {stats['viewers']:,}", category=category, overwrites=overwrite)
         game_vc      = await guild.create_voice_channel(f"🪻 | Game : {stats['game'][:28]}", category=category, overwrites=overwrite)
-
-        ids = {
-=======
-        followers_vc = await guild.create_voice_channel(f"🪻 | Followers : {stats['followers']:,}", category=category)
-        status_vc    = await guild.create_voice_channel("🪻 | Status : 🔴 LIVE" if stats["is_live"] else "🪻 | Status : ⚫ Offline", category=category)
-        viewers_vc   = await guild.create_voice_channel(f"🪻 | Viewers : {stats['viewers']:,}", category=category)
-        game_vc      = await guild.create_voice_channel(f"🪻 | Game : {stats['game'][:28]}", category=category)
-
-        overwrite = {guild.default_role: discord.PermissionOverwrite(connect=False, view_channel=True)}
-        for vc in [followers_vc, status_vc, viewers_vc, game_vc]:
-            await vc.edit(overwrites=overwrite)
-
-        self.channel_ids[guild.id] = {
->>>>>>> d41d31c352c0ebf98ee13bfc9bc59b6ac02c8450
-            "followers": followers_vc.id,
-            "status":    status_vc.id,
-            "viewers":   viewers_vc.id,
-            "game":      game_vc.id,
-        }
-<<<<<<< HEAD
+        ids = {"followers": followers_vc.id, "status": status_vc.id, "viewers": viewers_vc.id, "game": game_vc.id}
         self.channel_ids[guild.id] = ids
         save_channel_ids(guild.id, ids)
-
-        embed = discord.Embed(
-            title="✅ Twitch Analytics Ready!",
-            description=(f"📊 Tracking **{stats['username']}**\n📁 Category: **{category.name}**\n\nChannels auto-update every **5 minutes**."),
-=======
-        save_channel_ids(self.channel_ids)
-
-        embed = discord.Embed(
-            title="✅ Twitch Analytics Ready!",
-            description=(
-                f"📊 Tracking **{stats['username']}**\n"
-                f"📁 Category: **{category.name}**\n\n"
-                f"Channels auto-update every **5 minutes**."
-            ),
->>>>>>> d41d31c352c0ebf98ee13bfc9bc59b6ac02c8450
-            color=0x9146FF
-        )
+        embed = discord.Embed(title="✅ Twitch Analytics Ready!", description=f"📊 Tracking **{stats['username']}**\n📁 Category: **{category.name}**\n\nChannels auto-update every **5 minutes**.", color=0x9146FF)
         embed.set_footer(text="NinjaBot | Made by sdb_darkninja")
         await msg.edit(content=None, embed=embed)
         if not self.update_twitch_channels.is_running():
             self.update_twitch_channels.start()
 
-<<<<<<< HEAD
-=======
-    # ── -twitchstats ──────────────────────────────────────────────────────────
->>>>>>> d41d31c352c0ebf98ee13bfc9bc59b6ac02c8450
     @commands.command(name="twitchstats", aliases=["twitch"])
     async def twitch_stats(self, ctx):
         msg = await ctx.send("⏳ Fetching Twitch stats...")
         stats, error = await self.get_twitch_stats()
         if not stats:
             return await msg.edit(content=error)
-<<<<<<< HEAD
         await self.do_update(stats)
-=======
-
-        await self.do_update(stats)
-
->>>>>>> d41d31c352c0ebf98ee13bfc9bc59b6ac02c8450
         status = "🔴 **LIVE**" if stats["is_live"] else "⚫ **Offline**"
         embed = discord.Embed(title=f"📊 Twitch Stats — {stats['username']}", color=0x9146FF if stats["is_live"] else 0x666666)
         embed.add_field(name="Status",       value=status,                   inline=True)
@@ -254,11 +161,9 @@ class Twitch(commands.Cog):
         embed.set_footer(text="NinjaBot | Made by sdb_darkninja | Channels updated!")
         await msg.edit(content=None, embed=embed)
 
-<<<<<<< HEAD
     @commands.command(name="twitchreset")
     @commands.has_permissions(administrator=True)
     async def twitch_reset(self, ctx):
-        """Delete saved channel IDs — use before running twitchsetup fresh."""
         guild = ctx.guild
         if guild.id in self.channel_ids:
             del self.channel_ids[guild.id]
@@ -270,8 +175,6 @@ class Twitch(commands.Cog):
         else:
             await ctx.send("⚠️ No Twitch setup found for this server.")
 
-=======
->>>>>>> d41d31c352c0ebf98ee13bfc9bc59b6ac02c8450
     async def do_update(self, stats):
         for guild_id, ids in self.channel_ids.items():
             guild = self.bot.get_guild(guild_id)
@@ -287,11 +190,7 @@ class Twitch(commands.Cog):
                 ch = guild.get_channel(ids["game"])
                 if ch: await ch.edit(name=f"🪻 | Game : {stats['game'][:28]}")
             except Exception as e:
-<<<<<<< HEAD
                 print(f"[Twitch] Update failed for guild {guild_id}: {e}")
-=======
-                print(f"[Twitch] Update failed: {e}")
->>>>>>> d41d31c352c0ebf98ee13bfc9bc59b6ac02c8450
 
     @tasks.loop(minutes=5)
     async def update_twitch_channels(self):
@@ -305,10 +204,7 @@ class Twitch(commands.Cog):
 
     @commands.Cog.listener()
     async def on_ready(self):
-<<<<<<< HEAD
         self.channel_ids = load_channel_ids()
-=======
->>>>>>> d41d31c352c0ebf98ee13bfc9bc59b6ac02c8450
         if self.channel_ids and not self.update_twitch_channels.is_running():
             self.update_twitch_channels.start()
 
