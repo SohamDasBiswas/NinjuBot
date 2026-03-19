@@ -21,7 +21,7 @@ class Info(commands.Cog):
         embed.set_footer(text="NinjaBot | Powered by sdb_darkninja")
         await ctx.send(embed=embed)
 
-    @commands.command(name="help")
+    @commands.command(name="hel")
     async def help(self, ctx):
         embed = discord.Embed(
             title="🎵 NinjaBot — Command List",
