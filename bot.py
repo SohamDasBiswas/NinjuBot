@@ -2,14 +2,17 @@ import discord
 from discord.ext import commands
 import asyncio
 import os
+import signal
+import atexit
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 from keep_alive import keep_alive
 from database import init_db
 
 load_dotenv()
-
-# Initialize database on startup
 init_db()
+
+STATUS_CHANNEL_ID = 1484110480699031672
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -39,6 +42,18 @@ COGS = [
 
 MY_GUILD = discord.Object(id=1342866797958926368)
 
+async def send_status(title, description, color):
+    try:
+        channel = bot.get_channel(STATUS_CHANNEL_ID)
+        if not channel:
+            channel = await bot.fetch_channel(STATUS_CHANNEL_ID)
+        embed = discord.Embed(title=title, description=description, color=color)
+        embed.timestamp = datetime.now(timezone.utc)
+        embed.set_footer(text="NinjuBot Status")
+        await channel.send(embed=embed)
+    except Exception as e:
+        print(f"[Status] Failed to send notification: {e}")
+
 @bot.event
 async def on_ready():
     print(f"✅ Logged in as {bot.user} ({bot.user.id})")
@@ -54,6 +69,29 @@ async def on_ready():
             type=discord.ActivityType.listening,
             name="/play | sdb_darkninja"
         )
+    )
+    await send_status(
+        "✅ NinjuBot is Online!",
+        f"Bot started successfully.\n**Servers:** {len(bot.guilds)}\n**Cogs loaded:** {len(COGS)}",
+        0x2ECC71
+    )
+
+@bot.event
+async def on_disconnect():
+    print("⚠️ Bot disconnected!")
+    await send_status(
+        "⚠️ NinjuBot Disconnected",
+        "Bot lost connection to Discord. Attempting to reconnect...",
+        0xF39C12
+    )
+
+@bot.event
+async def on_resumed():
+    print("✅ Bot reconnected!")
+    await send_status(
+        "🔄 NinjuBot Reconnected",
+        "Bot successfully reconnected to Discord.",
+        0x3498DB
     )
 
 @bot.event
@@ -71,6 +109,13 @@ async def on_command_error(ctx, error):
     else:
         return
 
+async def notify_shutdown():
+    await send_status(
+        "🔴 NinjuBot is Offline",
+        "Bot is shutting down or crashed.",
+        0xE74C3C
+    )
+
 async def main():
     async with bot:
         for cog in COGS:
@@ -82,7 +127,16 @@ async def main():
         token = os.getenv("DISCORD_TOKEN")
         if not token:
             raise ValueError("DISCORD_TOKEN not set!")
-        await bot.start(token)
+        try:
+            await bot.start(token)
+        except Exception as e:
+            print(f"❌ Bot crashed: {e}")
+            await send_status(
+                "🔴 NinjuBot Crashed",
+                f"Bot encountered an error:\n```{str(e)[:500]}```",
+                0xE74C3C
+            )
+            raise
 
 keep_alive()
 asyncio.run(main())
