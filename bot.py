@@ -3,6 +3,7 @@ from discord.ext import commands
 import asyncio
 import os
 from dotenv import load_dotenv
+<<<<<<< HEAD
 from keep_alive import keep_alive
 from database import init_db
 
@@ -10,6 +11,29 @@ load_dotenv()
 
 # Initialize database on startup
 init_db()
+=======
+from flask import Flask
+from threading import Thread
+from keep_alive import keep_alive
+keep_alive()
+
+load_dotenv()
+
+app = Flask(__name__)
+
+
+@app.route('/')
+def home():
+    return "✅ NinjaBot is alive!"
+
+def run_flask():
+    app.run(host='0.0.0.0', port=8080)
+
+def keep_alive():
+    t = Thread(target=run_flask)
+    t.daemon = True
+    t.start()
+>>>>>>> d41d31c352c0ebf98ee13bfc9bc59b6ac02c8450
 
 intents = discord.Intents.default()
 intents.message_content = True
