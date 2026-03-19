@@ -2,7 +2,6 @@ import discord
 from discord.ext import commands
 import asyncio
 import os
-import time
 from datetime import datetime, timezone
 from dotenv import load_dotenv
 from keep_alive import keep_alive
@@ -71,18 +70,14 @@ async def on_ready():
     )
     await send_status(
         "✅ NinjuBot is Online!",
-        f"Bot started successfully.\n**Servers:** {len(bot.guilds)}\n**Cogs loaded:** {len(COGS)}",
+        f"Bot started successfully.\n**Servers:** {len(bot.guilds)}",
         0x2ECC71
     )
 
 @bot.event
-async def on_disconnect():
-    print("⚠️ Bot disconnected!")
-
-@bot.event
 async def on_resumed():
     print("✅ Bot reconnected!")
-    await send_status("🔄 NinjuBot Reconnected", "Bot successfully reconnected to Discord.", 0x3498DB)
+    await send_status("🔄 NinjuBot Reconnected", "Bot reconnected to Discord.", 0x3498DB)
 
 @bot.event
 async def on_command_error(ctx, error):
@@ -97,35 +92,37 @@ async def on_command_error(ctx, error):
             return
         await ctx.send(f"❌ {str(error.original)}")
 
-async def main():
-    async with bot:
-        for cog in COGS:
-            try:
-                await bot.load_extension(cog)
-                print(f"  ✅ {cog}")
-            except Exception as e:
-                print(f"  ❌ {cog}: {e}")
-        token = os.getenv("DISCORD_TOKEN")
-        if not token:
-            raise ValueError("DISCORD_TOKEN not set!")
+async def start_bot():
+    token = os.getenv("DISCORD_TOKEN")
+    if not token:
+        raise ValueError("DISCORD_TOKEN not set!")
 
-        # Retry loop with backoff to avoid 429 hammering
-        retry_delay = 10
-        while True:
-            try:
-                await bot.start(token)
-                break
-            except discord.errors.HTTPException as e:
-                if e.status == 429:
-                    print(f"⚠️ Rate limited by Discord. Waiting {retry_delay}s before retry...")
-                    await asyncio.sleep(retry_delay)
-                    retry_delay = min(retry_delay * 2, 300)  # max 5 min wait
-                else:
-                    raise
-            except Exception as e:
-                print(f"❌ Bot crashed: {e}")
-                await asyncio.sleep(30)
-                raise
+    for cog in COGS:
+        try:
+            await bot.load_extension(cog)
+            print(f"  ✅ {cog}")
+        except Exception as e:
+            print(f"  ❌ {cog}: {e}")
+
+    retry_delay = 30
+    while True:
+        try:
+            print(f"🔄 Attempting to connect to Discord...")
+            await bot.start(token)
+            break
+        except discord.errors.HTTPException as e:
+            if e.status == 429:
+                print(f"⚠️ Rate limited. Waiting {retry_delay}s...")
+                await asyncio.sleep(retry_delay)
+                retry_delay = min(retry_delay * 2, 600)  # max 10 min
+                # Reset bot for reconnection
+                await bot.close()
+            else:
+                print(f"❌ HTTP error: {e}")
+                await asyncio.sleep(60)
+        except Exception as e:
+            print(f"❌ Unexpected error: {e}")
+            await asyncio.sleep(60)
 
 keep_alive()
-asyncio.run(main())
+asyncio.run(start_bot())
