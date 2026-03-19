@@ -21,6 +21,8 @@ services:
         sync: false
       - key: DB_PATH
         value: /app/data/ninjubot.db
+      - key: PORT
+        value: 10000
     disk:
       name: ninjubot-data
       mountPath: /app/data
