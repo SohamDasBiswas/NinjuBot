@@ -2,8 +2,7 @@ import discord
 from discord.ext import commands
 import asyncio
 import os
-import signal
-import atexit
+import time
 from datetime import datetime, timezone
 from dotenv import load_dotenv
 from keep_alive import keep_alive
@@ -79,20 +78,11 @@ async def on_ready():
 @bot.event
 async def on_disconnect():
     print("⚠️ Bot disconnected!")
-    await send_status(
-        "⚠️ NinjuBot Disconnected",
-        "Bot lost connection to Discord. Attempting to reconnect...",
-        0xF39C12
-    )
 
 @bot.event
 async def on_resumed():
     print("✅ Bot reconnected!")
-    await send_status(
-        "🔄 NinjuBot Reconnected",
-        "Bot successfully reconnected to Discord.",
-        0x3498DB
-    )
+    await send_status("🔄 NinjuBot Reconnected", "Bot successfully reconnected to Discord.", 0x3498DB)
 
 @bot.event
 async def on_command_error(ctx, error):
@@ -106,15 +96,6 @@ async def on_command_error(ctx, error):
         if isinstance(error.original, asyncio.TimeoutError):
             return
         await ctx.send(f"❌ {str(error.original)}")
-    else:
-        return
-
-async def notify_shutdown():
-    await send_status(
-        "🔴 NinjuBot is Offline",
-        "Bot is shutting down or crashed.",
-        0xE74C3C
-    )
 
 async def main():
     async with bot:
@@ -127,16 +108,24 @@ async def main():
         token = os.getenv("DISCORD_TOKEN")
         if not token:
             raise ValueError("DISCORD_TOKEN not set!")
-        try:
-            await bot.start(token)
-        except Exception as e:
-            print(f"❌ Bot crashed: {e}")
-            await send_status(
-                "🔴 NinjuBot Crashed",
-                f"Bot encountered an error:\n```{str(e)[:500]}```",
-                0xE74C3C
-            )
-            raise
+
+        # Retry loop with backoff to avoid 429 hammering
+        retry_delay = 10
+        while True:
+            try:
+                await bot.start(token)
+                break
+            except discord.errors.HTTPException as e:
+                if e.status == 429:
+                    print(f"⚠️ Rate limited by Discord. Waiting {retry_delay}s before retry...")
+                    await asyncio.sleep(retry_delay)
+                    retry_delay = min(retry_delay * 2, 300)  # max 5 min wait
+                else:
+                    raise
+            except Exception as e:
+                print(f"❌ Bot crashed: {e}")
+                await asyncio.sleep(30)
+                raise
 
 keep_alive()
 asyncio.run(main())
