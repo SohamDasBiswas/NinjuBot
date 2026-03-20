@@ -44,7 +44,7 @@ PAGES = {
         "color": 0xE67E22,
         "fields": [
             ("Games", "`-wordle` — Play Wordle 🟩\n`-tictactoe @user` — Tic Tac Toe ❌⭕\n`-rps [@user]` — Rock Paper Scissors ✊\n`-gtrivia` — Multiple choice trivia quiz\n`-musictrivia` — Guess the song! 🎵"),
-            ("🎭 Truth or Dare", "`-ninja @user` — Challenge someone to Truth or Dare!\n`-tod @user` — Same command, short alias\nAI generates **funny Hinglish** truths & dares 🤖\nButtons: 🤔 Truth • 🔥 Dare • 🎲 Random"),
+            ("🎭 Truth or Dare", "`-tod @user` — Challenge someone to Truth or Dare!\n`-tod @user` — Same command, short alias\nAI generates **funny Hinglish** truths & dares 🤖\nButtons: 🤔 Truth • 🔥 Dare • 🎲 Random"),
             ("Utils", "`-8ball <question>` — Magic 8 ball 🎱\n`-coinflip` — Flip a coin 🪙\n`-roll [NdN]` — Roll dice 🎲\n`-meme` — Random meme 😂\n`-gif <query>` — Search GIFs\n`-avatar [@user]` — Get avatar"),
             ("Reminders", "`-remind <time> <message>` — Set reminder\n`-timer <time>` — Countdown timer"),
         ]
@@ -107,7 +107,7 @@ def make_home_embed(client):
         inline=False
     )
     embed.set_thumbnail(url=client.user.display_avatar.url)
-    embed.set_footer(text="NinjuBot | Made by sdb_darkninja 🔥 | Prefix: - | Use -ninja for help")
+    embed.set_footer(text="NinjuBot | Made by sdb_darkninja 🔥 | Prefix: - | Use -ninju for help")
     embed.timestamp = datetime.now(timezone.utc)
     return embed
 
@@ -115,7 +115,7 @@ class Info(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.command(name="ninja", aliases=["ninjubot", "menu", "guide", "bot"])
+    @commands.command(name="ninju", aliases=["ninjubot", "menu", "guide", "bot"])
     async def ninja_help(self, ctx):
         view = HelpView()
         embed = make_home_embed(ctx.bot)

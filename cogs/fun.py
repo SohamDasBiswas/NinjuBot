@@ -529,7 +529,7 @@ class Fun(commands.Cog):
 
 
     # ── Truth or Dare ─────────────────────────────────────────────────────────
-    @commands.command(name="truthordare", aliases=["tod", "td"])
+    @commands.command(name="tod", aliases=["truthordare", "td"])
     async def truth_or_dare(self, ctx, member: discord.Member = None):
         """Start a Truth or Dare game! Optionally challenge a specific user."""
         target = member or ctx.author
