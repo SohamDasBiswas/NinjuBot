@@ -575,12 +575,24 @@ def economy_user():
 
     from database import get_balance
     data = get_balance(str(guild_id), str(user_id))
+
+    # Get avatar hash from bot cache
+    avatar_hash = None
+    discriminator = '0'
+    if _bot_ref and _bot_ref.is_ready():
+        user = _bot_ref.get_user(int(user_id))
+        if user:
+            avatar_hash = str(user.avatar.key) if user.avatar else None
+            discriminator = str(user.discriminator) if hasattr(user, 'discriminator') else '0'
+
     return jsonify({
-        'user_id':  user_id,
-        'username': resolve_username(str(user_id)),
-        'balance':  data['balance'],
-        'wins':     data.get('wins', 0),
-        'losses':   data.get('losses', 0),
+        'user_id':      user_id,
+        'username':     resolve_username(str(user_id)),
+        'avatar_hash':  avatar_hash,
+        'discriminator': discriminator,
+        'balance':      data['balance'],
+        'wins':         data.get('wins', 0),
+        'losses':       data.get('losses', 0),
     })
 
 # ══════════════════════════════════════════════════════════════
