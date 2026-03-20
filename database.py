@@ -1,8 +1,7 @@
 import os
 from pymongo import MongoClient
-from pymongo.collection import Collection
+from pymongo.server_api import ServerApi
 
-# ── Connection ────────────────────────────────────────────────────────────────
 _client = None
 _db = None
 
@@ -13,18 +12,28 @@ def get_db():
     uri = os.getenv("MONGODB_URI")
     if not uri:
         raise ValueError("MONGODB_URI not set in environment variables!")
-    _client = MongoClient(uri)
+    _client = MongoClient(
+        uri,
+        server_api=ServerApi('1'),
+        tls=True,
+        tlsAllowInvalidCertificates=True,
+        serverSelectionTimeoutMS=30000,
+        connectTimeoutMS=30000,
+        socketTimeoutMS=30000,
+    )
     _db = _client["ninjubot"]
     print("✅ MongoDB connected")
     return _db
 
 def init_db():
     db = get_db()
-    # Create indexes for faster queries
-    db.currency.create_index("key", unique=True)
-    db.xp.create_index("key", unique=True)
-    db.twitch_channels.create_index("guild_id", unique=True)
-    print("✅ MongoDB indexes created")
+    try:
+        db.currency.create_index("key", unique=True)
+        db.xp.create_index("key", unique=True)
+        db.twitch_channels.create_index("guild_id", unique=True)
+        print("✅ MongoDB indexes created")
+    except Exception as e:
+        print(f"⚠️ Index creation warning (may already exist): {e}")
 
 # ── Currency ──────────────────────────────────────────────────────────────────
 
@@ -103,27 +112,6 @@ def get_top_xp(guild_id, limit=10):
 
 # ── Twitch Channels ───────────────────────────────────────────────────────────
 
-def get_conn():
-    """Compatibility shim for twitch.py which uses get_conn()"""
-    return MongoProxy(get_db())
-
-class MongoProxy:
-    """Thin proxy so twitch.py can call conn.execute() style queries"""
-    def __init__(self, db):
-        self.db = db
-
-    def execute(self, query, params=None):
-        return MongoResultProxy([])
-
-    def commit(self): pass
-    def close(self): pass
-
-class MongoResultProxy:
-    def __init__(self, data):
-        self._data = data
-    def fetchall(self):
-        return self._data
-
 def load_twitch_channels():
     db = get_db()
     docs = db.twitch_channels.find({})
@@ -142,11 +130,11 @@ def save_twitch_channel(guild_id, ids):
     db.twitch_channels.update_one(
         {"guild_id": str(guild_id)},
         {"$set": {
-            "guild_id": str(guild_id),
-            "followers_vc": str(ids["followers"]),
-            "status_vc":    str(ids["status"]),
-            "viewers_vc":   str(ids["viewers"]),
-            "game_vc":      str(ids["game"]),
+            "guild_id":      str(guild_id),
+            "followers_vc":  str(ids["followers"]),
+            "status_vc":     str(ids["status"]),
+            "viewers_vc":    str(ids["viewers"]),
+            "game_vc":       str(ids["game"]),
         }},
         upsert=True
     )
@@ -154,3 +142,16 @@ def save_twitch_channel(guild_id, ids):
 def delete_twitch_channel(guild_id):
     db = get_db()
     db.twitch_channels.delete_one({"guild_id": str(guild_id)})
+
+# ── Compatibility shim (for any legacy get_conn() calls) ─────────────────────
+def get_conn():
+    return _LegacyProxy(get_db())
+
+class _LegacyProxy:
+    def __init__(self, db): self.db = db
+    def execute(self, *a, **kw): return _LegacyResult()
+    def commit(self): pass
+    def close(self): pass
+
+class _LegacyResult:
+    def fetchall(self): return []
