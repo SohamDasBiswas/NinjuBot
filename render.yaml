@@ -7,6 +7,12 @@ services:
     envVars:
       - key: DISCORD_TOKEN
         sync: false
+      - key: DISCORD_CLIENT_ID
+        sync: false
+      - key: DISCORD_CLIENT_SECRET
+        sync: false
+      - key: DASHBOARD_ORIGIN
+        value: https://sohamdasbiswas.github.io
       - key: MONGODB_URI
         sync: false
       - key: SPOTIFY_CLIENT_ID
