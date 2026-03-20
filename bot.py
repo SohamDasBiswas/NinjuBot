@@ -160,11 +160,16 @@ def auth_discord():
 
 
 @flask_app.route('/auth/guilds', methods=['GET', 'OPTIONS'])
-@require_auth
 def auth_guilds():
     """Return guilds where user is admin AND NinjuBot is present."""
     if flask_request.method == 'OPTIONS':
         return _preflight()
+
+    # Manual auth check (OPTIONS must bypass @require_auth for CORS preflight to work)
+    auth = flask_request.headers.get('Authorization', '')
+    if not auth.startswith('Bearer '):
+        return jsonify({'error': 'Unauthorized'}), 401
+    flask_request.discord_token = auth.split(' ', 1)[1]
 
     try:
         user_guilds = discord_user_get('/users/@me/guilds', flask_request.discord_token)
