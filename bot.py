@@ -489,6 +489,100 @@ def get_channels():
 
     return jsonify([])
 
+
+# ══════════════════════════════════════════════════════════════
+#  ADMIN — Currency Manager
+# ══════════════════════════════════════════════════════════════
+
+@flask_app.route('/economy/admin', methods=['POST', 'OPTIONS'])
+def economy_admin():
+    """Admin-only: add/remove/set/reset a user's balance."""
+    if flask_request.method == 'OPTIONS':
+        return _preflight()
+
+    auth = flask_request.headers.get('Authorization', '')
+    if not auth.startswith('Bearer '):
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    # Verify caller is the owner via Discord API
+    try:
+        caller = discord_user_get('/users/@me', auth.split(' ', 1)[1])
+        if str(caller.get('id')) != '769225445803032617':
+            return jsonify({'error': 'Forbidden — owner only'}), 403
+    except Exception as e:
+        return jsonify({'error': f'Could not verify identity: {e}'}), 401
+
+    body     = flask_request.get_json(force=True) or {}
+    action   = body.get('action')        # add | remove | set | reset
+    guild_id = body.get('guild_id')
+    user_id  = body.get('user_id')
+    amount   = int(body.get('amount', 0))
+
+    if not guild_id or not user_id:
+        return jsonify({'error': 'guild_id and user_id required'}), 400
+
+    from database import get_balance, set_balance
+    data = get_balance(str(guild_id), str(user_id))
+    old_balance = data['balance']
+
+    if action == 'add':
+        if amount <= 0: return jsonify({'error': 'Amount must be positive'}), 400
+        data['balance'] += amount
+    elif action == 'remove':
+        if amount <= 0: return jsonify({'error': 'Amount must be positive'}), 400
+        data['balance'] = max(0, data['balance'] - amount)
+    elif action == 'set':
+        if amount < 0: return jsonify({'error': 'Amount cannot be negative'}), 400
+        data['balance'] = amount
+    elif action == 'reset':
+        data['balance'] = 0
+    else:
+        return jsonify({'error': 'Invalid action'}), 400
+
+    set_balance(str(guild_id), str(user_id), data)
+
+    username = resolve_username(str(user_id))
+    return jsonify({
+        'success':     True,
+        'action':      action,
+        'user_id':     user_id,
+        'username':    username,
+        'old_balance': old_balance,
+        'new_balance': data['balance'],
+    })
+
+@flask_app.route('/economy/user', methods=['GET', 'OPTIONS'])
+def economy_user():
+    """Get a single user's balance. Admin only."""
+    if flask_request.method == 'OPTIONS':
+        return _preflight()
+
+    auth = flask_request.headers.get('Authorization', '')
+    if not auth.startswith('Bearer '):
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    try:
+        caller = discord_user_get('/users/@me', auth.split(' ', 1)[1])
+        if str(caller.get('id')) != '769225445803032617':
+            return jsonify({'error': 'Forbidden'}), 403
+    except Exception as e:
+        return jsonify({'error': str(e)}), 401
+
+    guild_id = flask_request.args.get('guild_id')
+    user_id  = flask_request.args.get('user_id')
+    if not guild_id or not user_id:
+        return jsonify({'error': 'guild_id and user_id required'}), 400
+
+    from database import get_balance
+    data = get_balance(str(guild_id), str(user_id))
+    return jsonify({
+        'user_id':  user_id,
+        'username': resolve_username(str(user_id)),
+        'balance':  data['balance'],
+        'wins':     data.get('wins', 0),
+        'losses':   data.get('losses', 0),
+    })
+
 # ══════════════════════════════════════════════════════════════
 #  CORS preflight helper
 # ══════════════════════════════════════════════════════════════
