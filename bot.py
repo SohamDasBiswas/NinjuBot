@@ -307,17 +307,30 @@ def economy_leaderboard():
     if flask_request.method == 'OPTIONS':
         return _preflight()
 
-    # Manual auth check (OPTIONS must bypass @require_auth for CORS preflight to work)
     auth = flask_request.headers.get('Authorization', '')
     if not auth.startswith('Bearer '):
         return jsonify({'error': 'Unauthorized'}), 401
     flask_request.discord_token = auth.split(' ', 1)[1]
+
     guild_id = flask_request.args.get('guild_id')
-    query = {'guild_id': str(guild_id)} if guild_id else {}
-    # collection is called 'currency' in database.py
-    docs = list(get_db().currency.find(query, {'_id': 0, 'user_id': 1, 'balance': 1}).sort('balance', -1).limit(10))
-    # rename fields to match what dashboard expects
-    result = [{'user_id': d.get('user_id'), 'username': resolve_username(str(d.get('user_id', '0'))), 'balance': d.get('balance', 0)} for d in docs]
+    scope    = flask_request.args.get('scope', 'server')  # 'server' or 'global'
+
+    if scope == 'global' or not guild_id:
+        query = {}
+    else:
+        query = {'guild_id': str(guild_id)}
+
+    docs = list(get_db().currency.find(query, {'_id': 0, 'user_id': 1, 'guild_id': 1, 'balance': 1, 'wins': 1, 'losses': 1}).sort('balance', -1).limit(10))
+    result = []
+    for d in docs:
+        uid = str(d.get('user_id', '0'))
+        result.append({
+            'user_id':  uid,
+            'username': resolve_username(uid),
+            'balance':  d.get('balance', 0),
+            'wins':     d.get('wins', 0),
+            'losses':   d.get('losses', 0),
+        })
     return jsonify(result)
 
 @flask_app.route('/levels/leaderboard', methods=['GET', 'OPTIONS'])
@@ -325,15 +338,29 @@ def levels_leaderboard():
     if flask_request.method == 'OPTIONS':
         return _preflight()
 
-    # Manual auth check (OPTIONS must bypass @require_auth for CORS preflight to work)
     auth = flask_request.headers.get('Authorization', '')
     if not auth.startswith('Bearer '):
         return jsonify({'error': 'Unauthorized'}), 401
     flask_request.discord_token = auth.split(' ', 1)[1]
+
     guild_id = flask_request.args.get('guild_id')
-    query = {'guild_id': str(guild_id)} if guild_id else {}
-    docs = list(get_db().xp.find(query, {'_id': 0, 'user_id': 1, 'xp': 1, 'level': 1}).sort('xp', -1).limit(10))
-    result = [{'user_id': d.get('user_id'), 'username': resolve_username(str(d.get('user_id', '0'))), 'xp': d.get('xp', 0), 'level': d.get('level', 0)} for d in docs]
+    scope    = flask_request.args.get('scope', 'server')  # 'server' or 'global'
+
+    if scope == 'global' or not guild_id:
+        query = {}
+    else:
+        query = {'guild_id': str(guild_id)}
+
+    docs = list(get_db().xp.find(query, {'_id': 0, 'user_id': 1, 'guild_id': 1, 'xp': 1, 'level': 1}).sort('xp', -1).limit(10))
+    result = []
+    for d in docs:
+        uid = str(d.get('user_id', '0'))
+        result.append({
+            'user_id':  uid,
+            'username': resolve_username(uid),
+            'xp':       d.get('xp', 0),
+            'level':    d.get('level', 0),
+        })
     return jsonify(result)
 
 # ══════════════════════════════════════════════════════════════
