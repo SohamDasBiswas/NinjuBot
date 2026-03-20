@@ -183,20 +183,23 @@ def auth_guilds():
         bot_guilds_raw = bot_discord_get('/users/@me/guilds')
         bot_guild_ids  = {g['id'] for g in bot_guilds_raw} if isinstance(bot_guilds_raw, list) else set()
 
-    # Build a map of guild_id -> member_count from the live bot (most accurate)
-    bot_member_counts = {}
-    if _bot_ref and _bot_ref.is_ready():
-        for bg in _bot_ref.guilds:
-            bot_member_counts[str(bg.id)] = bg.member_count
-
     ADMINISTRATOR = 0x8
     result = []
     for g in user_guilds:
         perms    = int(g.get('permissions', 0))
         is_admin = bool(perms & ADMINISTRATOR) or g.get('owner', False)
         if is_admin and g['id'] in bot_guild_ids:
-            # Prefer live bot member count, fall back to Discord API value
-            member_count = bot_member_counts.get(g['id'], g.get('approximate_member_count', 0))
+            # Try live bot cache first
+            member_count = 0
+            if _bot_ref and _bot_ref.is_ready():
+                bot_guild = _bot_ref.get_guild(int(g['id']))
+                if bot_guild:
+                    member_count = bot_guild.member_count or 0
+            # If still 0, fetch directly from Discord API with bot token
+            if member_count == 0:
+                guild_data = bot_discord_get(f'/guilds/{g["id"]}?with_counts=true')
+                member_count = (guild_data.get('approximate_member_count')
+                                or guild_data.get('member_count') or 0)
             result.append({
                 'id':                       g['id'],
                 'name':                     g['name'],
