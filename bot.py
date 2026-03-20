@@ -2,9 +2,12 @@ import discord
 from discord.ext import commands
 import asyncio
 import os
+import sys
 from datetime import datetime, timezone
 from dotenv import load_dotenv
 from database import init_db
+
+print("🚀 bot.py starting...", flush=True)
 
 load_dotenv()
 init_db()
@@ -34,14 +37,11 @@ def run_flask():
     port = int(os.environ.get("PORT", 10000))
     flask_app.run(host='0.0.0.0', port=port)
 
-# Start Flask in background thread FIRST
 t = Thread(target=run_flask)
 t.daemon = True
 t.start()
+print("✅ Flask thread started", flush=True)
 
-print("✅ Flask started")
-
-# Now set up Discord bot
 STATUS_CHANNEL_ID = 1484110480699031672
 
 intents = discord.Intents.default()
@@ -82,18 +82,18 @@ async def send_status(title, description, color):
         embed.set_footer(text="NinjuBot Status")
         await channel.send(embed=embed)
     except Exception as e:
-        print(f"[Status] Failed: {e}")
+        print(f"[Status] Failed: {e}", flush=True)
 
 @bot.event
 async def on_ready():
-    print(f"✅ Logged in as {bot.user} ({bot.user.id})")
-    print(f"📡 Connected to {len(bot.guilds)} server(s)")
+    print(f"✅ Logged in as {bot.user} ({bot.user.id})", flush=True)
+    print(f"📡 Connected to {len(bot.guilds)} server(s)", flush=True)
     try:
         bot.tree.copy_global_to(guild=MY_GUILD)
         synced = await bot.tree.sync(guild=MY_GUILD)
-        print(f"✅ Synced {len(synced)} slash command(s)")
+        print(f"✅ Synced {len(synced)} slash command(s)", flush=True)
     except Exception as e:
-        print(f"❌ Slash sync failed: {e}")
+        print(f"❌ Slash sync failed: {e}", flush=True)
     await bot.change_presence(
         activity=discord.Activity(
             type=discord.ActivityType.listening,
@@ -108,7 +108,7 @@ async def on_ready():
 
 @bot.event
 async def on_resumed():
-    print("✅ Bot reconnected!")
+    print("✅ Bot reconnected!", flush=True)
     await send_status("🔄 NinjuBot Reconnected", "Bot reconnected to Discord.", 0x3498DB)
 
 @bot.event
@@ -125,27 +125,30 @@ async def on_command_error(ctx, error):
         await ctx.send(f"❌ {str(error.original)}")
 
 async def start_bot():
+    print("🔄 start_bot() called", flush=True)
     token = os.getenv("DISCORD_TOKEN")
     if not token:
-        print("❌ DISCORD_TOKEN not set!")
+        print("❌ DISCORD_TOKEN not set! Check environment variables.", flush=True)
         return
+
+    print(f"🔑 Token found (length: {len(token)})", flush=True)
 
     for cog in COGS:
         try:
             await bot.load_extension(cog)
-            print(f"  ✅ {cog}")
+            print(f"  ✅ {cog}", flush=True)
         except Exception as e:
-            print(f"  ❌ {cog}: {e}")
+            print(f"  ❌ {cog}: {e}", flush=True)
 
     retry_delay = 30
     while True:
         try:
-            print("🔄 Attempting to connect to Discord...")
+            print("🔄 Attempting to connect to Discord...", flush=True)
             await bot.start(token)
             break
         except discord.errors.HTTPException as e:
             if e.status == 429:
-                print(f"⚠️ Rate limited. Waiting {retry_delay}s...")
+                print(f"⚠️ Rate limited. Waiting {retry_delay}s...", flush=True)
                 await asyncio.sleep(retry_delay)
                 retry_delay = min(retry_delay * 2, 600)
                 try:
@@ -153,10 +156,11 @@ async def start_bot():
                 except:
                     pass
             else:
-                print(f"❌ HTTP error: {e}")
+                print(f"❌ HTTP error: {e}", flush=True)
                 await asyncio.sleep(60)
         except Exception as e:
-            print(f"❌ Unexpected error: {e}")
+            print(f"❌ Unexpected error: {type(e).__name__}: {e}", flush=True)
             await asyncio.sleep(60)
 
+print("▶️ Calling asyncio.run(start_bot())", flush=True)
 asyncio.run(start_bot())
