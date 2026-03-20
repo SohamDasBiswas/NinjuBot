@@ -238,10 +238,15 @@ DEFAULT_SETTINGS = {
 }
 
 @flask_app.route('/settings', methods=['GET', 'OPTIONS'])
-@require_auth
 def get_settings():
     if flask_request.method == 'OPTIONS':
         return _preflight()
+
+    # Manual auth check (OPTIONS must bypass @require_auth for CORS preflight to work)
+    auth = flask_request.headers.get('Authorization', '')
+    if not auth.startswith('Bearer '):
+        return jsonify({'error': 'Unauthorized'}), 401
+    flask_request.discord_token = auth.split(' ', 1)[1]
     guild_id = flask_request.args.get('guild_id')
     if not guild_id:
         return jsonify({'error': 'guild_id required'}), 400
@@ -251,10 +256,15 @@ def get_settings():
     return jsonify(merged)
 
 @flask_app.route('/settings/update', methods=['POST', 'OPTIONS'])
-@require_auth
 def update_settings():
     if flask_request.method == 'OPTIONS':
         return _preflight()
+
+    # Manual auth check (OPTIONS must bypass @require_auth for CORS preflight to work)
+    auth = flask_request.headers.get('Authorization', '')
+    if not auth.startswith('Bearer '):
+        return jsonify({'error': 'Unauthorized'}), 401
+    flask_request.discord_token = auth.split(' ', 1)[1]
     body     = flask_request.get_json(force=True) or {}
     guild_id = body.get('guild_id')
     settings = body.get('settings', {})
@@ -272,10 +282,15 @@ def update_settings():
 # ══════════════════════════════════════════════════════════════
 
 @flask_app.route('/economy/leaderboard', methods=['GET', 'OPTIONS'])
-@require_auth
 def economy_leaderboard():
     if flask_request.method == 'OPTIONS':
         return _preflight()
+
+    # Manual auth check (OPTIONS must bypass @require_auth for CORS preflight to work)
+    auth = flask_request.headers.get('Authorization', '')
+    if not auth.startswith('Bearer '):
+        return jsonify({'error': 'Unauthorized'}), 401
+    flask_request.discord_token = auth.split(' ', 1)[1]
     guild_id = flask_request.args.get('guild_id')
     query = {'guild_id': str(guild_id)} if guild_id else {}
     # collection is called 'currency' in database.py
@@ -285,10 +300,15 @@ def economy_leaderboard():
     return jsonify(result)
 
 @flask_app.route('/levels/leaderboard', methods=['GET', 'OPTIONS'])
-@require_auth
 def levels_leaderboard():
     if flask_request.method == 'OPTIONS':
         return _preflight()
+
+    # Manual auth check (OPTIONS must bypass @require_auth for CORS preflight to work)
+    auth = flask_request.headers.get('Authorization', '')
+    if not auth.startswith('Bearer '):
+        return jsonify({'error': 'Unauthorized'}), 401
+    flask_request.discord_token = auth.split(' ', 1)[1]
     guild_id = flask_request.args.get('guild_id')
     query = {'guild_id': str(guild_id)} if guild_id else {}
     docs = list(get_db().xp.find(query, {'_id': 0, 'user_id': 1, 'xp': 1, 'level': 1}).sort('xp', -1).limit(10))
@@ -300,10 +320,15 @@ def levels_leaderboard():
 # ══════════════════════════════════════════════════════════════
 
 @flask_app.route('/audit/log', methods=['GET', 'OPTIONS'])
-@require_auth
 def audit_log():
     if flask_request.method == 'OPTIONS':
         return _preflight()
+
+    # Manual auth check (OPTIONS must bypass @require_auth for CORS preflight to work)
+    auth = flask_request.headers.get('Authorization', '')
+    if not auth.startswith('Bearer '):
+        return jsonify({'error': 'Unauthorized'}), 401
+    flask_request.discord_token = auth.split(' ', 1)[1]
     guild_id = flask_request.args.get('guild_id')
     limit    = min(int(flask_request.args.get('limit', 100)), 500)
     query    = {'guild_id': str(guild_id)} if guild_id else {}
@@ -318,10 +343,15 @@ def audit_log():
 # ══════════════════════════════════════════════════════════════
 
 @flask_app.route('/booster/stats', methods=['GET', 'OPTIONS'])
-@require_auth
 def booster_stats():
     if flask_request.method == 'OPTIONS':
         return _preflight()
+
+    # Manual auth check (OPTIONS must bypass @require_auth for CORS preflight to work)
+    auth = flask_request.headers.get('Authorization', '')
+    if not auth.startswith('Bearer '):
+        return jsonify({'error': 'Unauthorized'}), 401
+    flask_request.discord_token = auth.split(' ', 1)[1]
     guild_id = flask_request.args.get('guild_id')
     if not guild_id:
         return jsonify({'error': 'guild_id required'}), 400
@@ -347,10 +377,15 @@ def booster_stats():
 # ══════════════════════════════════════════════════════════════
 
 @flask_app.route('/db/stats', methods=['GET', 'OPTIONS'])
-@require_auth
 def db_stats():
     if flask_request.method == 'OPTIONS':
         return _preflight()
+
+    # Manual auth check (OPTIONS must bypass @require_auth for CORS preflight to work)
+    auth = flask_request.headers.get('Authorization', '')
+    if not auth.startswith('Bearer '):
+        return jsonify({'error': 'Unauthorized'}), 401
+    flask_request.discord_token = auth.split(' ', 1)[1]
     try:
         db      = get_db()
         db_stat = db.command('dbStats')
