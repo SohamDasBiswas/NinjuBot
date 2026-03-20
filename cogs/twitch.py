@@ -2,15 +2,62 @@ import discord
 from discord.ext import commands, tasks
 import aiohttp
 import os
-from database import load_twitch_channels, save_twitch_channel, delete_twitch_channel
 
 TWITCH_USERNAME = "sdb_darkninja"
+
+# ── In-memory store (loaded lazily from MongoDB) ──────────────────────────────
+_channel_ids = {}
+
+def _get_db():
+    from database import get_db
+    return get_db()
+
+def _load():
+    try:
+        db = _get_db()
+        docs = db.twitch_channels.find({})
+        result = {}
+        for doc in docs:
+            result[int(doc["guild_id"])] = {
+                "followers": int(doc["followers_vc"]),
+                "status":    int(doc["status_vc"]),
+                "viewers":   int(doc["viewers_vc"]),
+                "game":      int(doc["game_vc"]),
+            }
+        return result
+    except Exception as e:
+        print(f"[Twitch] DB load failed (non-fatal): {e}")
+        return {}
+
+def _save(guild_id, ids):
+    try:
+        db = _get_db()
+        db.twitch_channels.update_one(
+            {"guild_id": str(guild_id)},
+            {"$set": {
+                "guild_id":     str(guild_id),
+                "followers_vc": str(ids["followers"]),
+                "status_vc":    str(ids["status"]),
+                "viewers_vc":   str(ids["viewers"]),
+                "game_vc":      str(ids["game"]),
+            }},
+            upsert=True
+        )
+    except Exception as e:
+        print(f"[Twitch] DB save failed: {e}")
+
+def _delete(guild_id):
+    try:
+        db = _get_db()
+        db.twitch_channels.delete_one({"guild_id": str(guild_id)})
+    except Exception as e:
+        print(f"[Twitch] DB delete failed: {e}")
 
 class Twitch(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.access_token = None
-        self.channel_ids = load_twitch_channels()
+        self.channel_ids = {}  # loaded after bot is ready
 
     async def get_token(self):
         client_id = os.getenv("TWITCH_CLIENT_ID")
@@ -90,7 +137,7 @@ class Twitch(commands.Cog):
         game_vc      = await guild.create_voice_channel(f"🪻 | Game : {stats['game'][:28]}", category=category, overwrites=overwrite)
         ids = {"followers": followers_vc.id, "status": status_vc.id, "viewers": viewers_vc.id, "game": game_vc.id}
         self.channel_ids[guild.id] = ids
-        save_twitch_channel(guild.id, ids)
+        _save(guild.id, ids)
         embed = discord.Embed(title="✅ Twitch Analytics Ready!", description=f"📊 Tracking **{stats['username']}**\n📁 Category: **{category.name}**\n\nChannels auto-update every **5 minutes**.", color=0x9146FF)
         embed.set_footer(text="NinjuBot | Made by sdb_darkninja")
         await msg.edit(content=None, embed=embed)
@@ -121,7 +168,7 @@ class Twitch(commands.Cog):
         guild = ctx.guild
         if guild.id in self.channel_ids:
             del self.channel_ids[guild.id]
-            delete_twitch_channel(guild.id)
+            _delete(guild.id)
             await ctx.send("✅ Reset done. Run `-twitchsetup` to create fresh channels.")
         else:
             await ctx.send("⚠️ No Twitch setup found for this server.")
@@ -155,7 +202,7 @@ class Twitch(commands.Cog):
 
     @commands.Cog.listener()
     async def on_ready(self):
-        self.channel_ids = load_twitch_channels()
+        self.channel_ids = _load()
         if self.channel_ids and not self.update_twitch_channels.is_running():
             self.update_twitch_channels.start()
 

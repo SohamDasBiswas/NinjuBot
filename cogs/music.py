@@ -28,7 +28,6 @@ def cache_set(key, value):
 
 YTDL_OPTIONS = {
     "format": "bestaudio/best",
-    "format_sort": ["abr", "asr"],
     "noplaylist": False,
     "quiet": True,
     "no_warnings": True,
@@ -41,6 +40,7 @@ YTDL_OPTIONS = {
     "extract_flat": False,
     "geo_bypass": True,
     "nocheckcertificate": True,
+    "extractor_args": {"youtube": {"skip": ["dash", "hls"]}},
 }
 if os.path.exists("cookies.txt"):
     YTDL_OPTIONS["cookiefile"] = "cookies.txt"
@@ -160,13 +160,12 @@ def mk_embed(title, desc, color=0x1DB954, thumb=None):
         e.set_thumbnail(url=thumb)
     return e
 
-# ── Music Player Controls View ────────────────────────────────────────────────
 class PlayerView(discord.ui.View):
-    def __init__(self, ctx, song):
+    def __init__(self, ctx):
         super().__init__(timeout=300)
         self.ctx = ctx
 
-    @discord.ui.button(emoji="⏸️", style=discord.ButtonStyle.secondary, custom_id="pause_resume")
+    @discord.ui.button(emoji="⏸️", style=discord.ButtonStyle.secondary)
     async def pause_resume(self, interaction: discord.Interaction, button: discord.ui.Button):
         vc = interaction.guild.voice_client
         if not vc:
@@ -175,14 +174,13 @@ class PlayerView(discord.ui.View):
             vc.pause()
             button.emoji = "▶️"
             button.style = discord.ButtonStyle.success
-            await interaction.response.edit_message(view=self)
         elif vc.is_paused():
             vc.resume()
             button.emoji = "⏸️"
             button.style = discord.ButtonStyle.secondary
-            await interaction.response.edit_message(view=self)
+        await interaction.response.edit_message(view=self)
 
-    @discord.ui.button(emoji="⏭️", style=discord.ButtonStyle.primary, custom_id="skip")
+    @discord.ui.button(emoji="⏭️", style=discord.ButtonStyle.primary)
     async def skip(self, interaction: discord.Interaction, button: discord.ui.Button):
         vc = interaction.guild.voice_client
         if vc and (vc.is_playing() or vc.is_paused()):
@@ -191,7 +189,7 @@ class PlayerView(discord.ui.View):
         else:
             await interaction.response.send_message("❌ Nothing playing!", ephemeral=True)
 
-    @discord.ui.button(emoji="⏹️", style=discord.ButtonStyle.danger, custom_id="stop")
+    @discord.ui.button(emoji="⏹️", style=discord.ButtonStyle.danger)
     async def stop(self, interaction: discord.Interaction, button: discord.ui.Button):
         get_queue(interaction.guild.id).clear()
         vc = interaction.guild.voice_client
@@ -199,22 +197,21 @@ class PlayerView(discord.ui.View):
             vc.stop()
         await interaction.response.send_message("⏹️ Stopped and queue cleared.", ephemeral=True)
 
-    @discord.ui.button(emoji="🔂", style=discord.ButtonStyle.secondary, custom_id="loop")
+    @discord.ui.button(emoji="🔂", style=discord.ButtonStyle.secondary)
     async def loop(self, interaction: discord.Interaction, button: discord.ui.Button):
         q = get_queue(interaction.guild.id)
         modes = ["none", "song", "queue"]
-        idx = modes.index(q.loop_mode)
-        q.loop_mode = modes[(idx + 1) % 3]
+        q.loop_mode = modes[(modes.index(q.loop_mode) + 1) % 3]
         icons = {"none": "➡️", "song": "🔂", "queue": "🔁"}
         button.emoji = icons[q.loop_mode]
         await interaction.response.edit_message(view=self)
         await interaction.followup.send(f"{icons[q.loop_mode]} Loop: **{q.loop_mode}**", ephemeral=True)
 
-    @discord.ui.button(emoji="🔊", style=discord.ButtonStyle.secondary, custom_id="volume", row=1)
+    @discord.ui.button(emoji="🔊", style=discord.ButtonStyle.secondary, row=1)
     async def volume(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(VolumeModal())
 
-    @discord.ui.button(label="Queue", emoji="📋", style=discord.ButtonStyle.secondary, custom_id="queue", row=1)
+    @discord.ui.button(label="Queue", emoji="📋", style=discord.ButtonStyle.secondary, row=1)
     async def queue_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         q = get_queue(interaction.guild.id)
         if not q.current and not q.queue:
@@ -227,24 +224,22 @@ class PlayerView(discord.ui.View):
         if len(q.queue) > 10:
             desc += f"\n*...and {len(q.queue)-10} more*"
         embed = discord.Embed(title="📋 Current Queue", description=desc, color=0x1DB954)
-        embed.set_footer(text=f"🔁 Loop: {q.loop_mode} | 🔊 Volume: {int(q.queue.__class__.__name__ and 50)}%")
+        embed.set_footer(text=f"🔁 Loop: {q.loop_mode}")
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
 class VolumeModal(discord.ui.Modal, title="🔊 Set Volume"):
     volume = discord.ui.TextInput(
         label="Volume (1-100)",
         placeholder="Enter a number between 1 and 100",
-        min_length=1,
-        max_length=3
+        min_length=1, max_length=3
     )
-
     async def on_submit(self, interaction: discord.Interaction):
         try:
             vol = int(self.volume.value)
             if not 1 <= vol <= 100:
                 raise ValueError
         except ValueError:
-            return await interaction.response.send_message("❌ Enter a number between 1-100!", ephemeral=True)
+            return await interaction.response.send_message("❌ Enter a number 1-100!", ephemeral=True)
         q = get_queue(interaction.guild.id)
         q.volume = vol / 100
         vc = interaction.guild.voice_client
@@ -252,7 +247,6 @@ class VolumeModal(discord.ui.Modal, title="🔊 Set Volume"):
             vc.source.volume = q.volume
         await interaction.response.send_message(f"🔊 Volume set to **{vol}%**", ephemeral=True)
 
-# ── Music Cog ─────────────────────────────────────────────────────────────────
 class Music(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -285,13 +279,7 @@ class Music(commands.Cog):
                 q.add(q.current)
             song = q.next()
         if not song:
-            embed = discord.Embed(
-                title="✅ Queue Finished",
-                description="No more songs in queue. Add more with `-play`!",
-                color=0x2ECC71
-            )
-            embed.set_footer(text="🎵 NinjuBot | Made by sdb_darkninja")
-            await ctx.send(embed=embed)
+            await ctx.send(embed=mk_embed("✅ Queue Finished", "No more songs! Add more with `-play`."))
             return
         q.current = song
         if q.peek() and q.peek().get("webpage_url"):
@@ -304,11 +292,7 @@ class Music(commands.Cog):
                     print(f"[Player] {err}")
                 asyncio.run_coroutine_threadsafe(self.play_next(ctx), self.bot.loop)
             vc.play(source, after=after_play)
-
-            embed = discord.Embed(
-                title="🎵 Now Playing",
-                color=0x1DB954
-            )
+            embed = discord.Embed(title="🎵 Now Playing", color=0x1DB954)
             embed.add_field(name="Track", value=f"**[{song['title']}]({song['webpage_url']})**", inline=False)
             embed.add_field(name="⏱ Duration", value=f"`{fmt_duration(song['duration'])}`", inline=True)
             embed.add_field(name="🔊 Volume", value=f"`{int(q.volume*100)}%`", inline=True)
@@ -317,8 +301,7 @@ class Music(commands.Cog):
             if song.get("thumbnail"):
                 embed.set_thumbnail(url=song["thumbnail"])
             embed.set_footer(text="🎵 NinjuBot | Made by sdb_darkninja")
-            view = PlayerView(ctx, song)
-            await ctx.send(embed=embed, view=view)
+            await ctx.send(embed=embed, view=PlayerView(ctx))
         except Exception as e:
             await ctx.send(embed=mk_embed("❌ Error", str(e), color=0xFF0000))
             await self.play_next(ctx)
@@ -364,9 +347,7 @@ class Music(commands.Cog):
                 q.add({"type": "lazy", "query": t, "title": t, "duration": 0,
                        "url": "", "webpage_url": "", "thumbnail": ""})
                 added += 1
-            embed = discord.Embed(title="📋 Playlist Added", description=f"Queued **{added} songs** from playlist!", color=0x1DB954)
-            embed.set_footer(text="🎵 NinjuBot | Made by sdb_darkninja")
-            await msg.edit(embed=embed)
+            await msg.edit(embed=mk_embed("📋 Playlist Added", f"Queued **{added} songs** from playlist!"))
             if not ctx.voice_client.is_playing():
                 await self.play_next(ctx)
             return
@@ -399,16 +380,12 @@ class Music(commands.Cog):
         if ctx.voice_client and ctx.voice_client.is_playing():
             ctx.voice_client.pause()
             await ctx.send(embed=mk_embed("⏸️ Paused", "Use `-resume` to continue."))
-        else:
-            await ctx.send(embed=mk_embed("❌ Not Playing", "Nothing is playing right now.", color=0xFF0000))
 
     @commands.command(name="resume", aliases=["r"])
     async def resume(self, ctx):
         if ctx.voice_client and ctx.voice_client.is_paused():
             ctx.voice_client.resume()
             await ctx.send(embed=mk_embed("▶️ Resumed", "Music is back!"))
-        else:
-            await ctx.send(embed=mk_embed("❌ Not Paused", "Nothing is paused.", color=0xFF0000))
 
     @commands.command(name="stop")
     async def stop(self, ctx):
@@ -424,20 +401,18 @@ class Music(commands.Cog):
             return await ctx.send(embed=mk_embed("📋 Queue Empty", "Nothing in queue! Use `-play` to add songs."))
         embed = discord.Embed(title="📋 Music Queue", color=0x1DB954)
         if q.current:
-            embed.add_field(
-                name="▶️ Now Playing",
+            embed.add_field(name="▶️ Now Playing",
                 value=f"[{q.current['title']}]({q.current['webpage_url']}) `{fmt_duration(q.current['duration'])}`",
-                inline=False
-            )
+                inline=False)
         if q.queue:
             up_next = "\n".join([
                 f"`{i}.` [{s['title']}]({s.get('webpage_url','')}) `{fmt_duration(s['duration'])}`"
                 for i, s in enumerate(list(q.queue)[:10], 1)
             ])
             if len(q.queue) > 10:
-                up_next += f"\n*...and {len(q.queue)-10} more songs*"
+                up_next += f"\n*...and {len(q.queue)-10} more*"
             embed.add_field(name="⏭️ Up Next", value=up_next, inline=False)
-        embed.set_footer(text=f"🔁 Loop: {q.loop_mode} | 🔊 Vol: {int(q.volume*100)}% | 📋 {len(q.queue)} songs queued")
+        embed.set_footer(text=f"🔁 Loop: {q.loop_mode} | 🔊 Vol: {int(q.volume*100)}% | 📋 {len(q.queue)} queued")
         await ctx.send(embed=embed)
 
     @commands.command(name="nowplaying", aliases=["np"])
@@ -459,7 +434,7 @@ class Music(commands.Cog):
     @commands.command(name="volume", aliases=["vol"])
     async def volume(self, ctx, vol: int):
         if not 1 <= vol <= 100:
-            return await ctx.send(embed=mk_embed("❌ Invalid Volume", "Volume must be between 1 and 100.", color=0xFF0000))
+            return await ctx.send(embed=mk_embed("❌ Invalid", "Volume must be 1-100.", color=0xFF0000))
         q = get_queue(ctx.guild.id)
         q.volume = vol / 100
         if ctx.voice_client and ctx.voice_client.source:
@@ -470,7 +445,7 @@ class Music(commands.Cog):
     async def loop(self, ctx, mode: str = "song"):
         mode = mode.lower()
         if mode not in ("song", "queue", "none"):
-            return await ctx.send(embed=mk_embed("❌ Invalid Mode", "Use `song`, `queue`, or `none`.", color=0xFF0000))
+            return await ctx.send(embed=mk_embed("❌ Invalid", "Use `song`, `queue`, or `none`.", color=0xFF0000))
         get_queue(ctx.guild.id).loop_mode = mode
         icons = {"song": "🔂", "queue": "🔁", "none": "➡️"}
         await ctx.send(embed=mk_embed(f"{icons[mode]} Loop Mode", f"Loop set to **{mode}**"))
@@ -490,7 +465,6 @@ class Music(commands.Cog):
     @commands.command(name="search")
     async def search(self, ctx, *, query: str):
         embed = discord.Embed(title="🔍 Searching...", description=f"```{query}```", color=0xFFAA00)
-        embed.set_footer(text="🎵 NinjuBot | Made by sdb_darkninja")
         msg = await ctx.send(embed=embed)
         try:
             data = await self.bot.loop.run_in_executor(
@@ -499,17 +473,11 @@ class Music(commands.Cog):
             results = data.get("entries", [])[:5]
         except Exception as e:
             return await msg.edit(embed=mk_embed("❌ Error", str(e), color=0xFF0000))
-
         embed = discord.Embed(title="🔍 Search Results", color=0x1DB954)
         for i, r in enumerate(results, 1):
-            embed.add_field(
-                name=f"{i}. {r['title'][:50]}",
-                value=f"⏱ `{fmt_duration(r.get('duration',0))}` | [Watch]({r['webpage_url']})",
-                inline=False
-            )
+            embed.add_field(name=f"{i}. {r['title'][:50]}", value=f"⏱ `{fmt_duration(r.get('duration',0))}` | [Watch]({r['webpage_url']})", inline=False)
         embed.set_footer(text="Reply with a number 1-5 to play")
         await msg.edit(embed=embed)
-
         def check(m):
             return m.author == ctx.author and m.channel == ctx.channel and m.content.isdigit()
         try:
@@ -525,42 +493,28 @@ class Music(commands.Cog):
     async def slash_play(self, interaction: discord.Interaction, query: str):
         if not interaction.user.voice:
             return await interaction.response.send_message(
-                embed=mk_embed("❌ No Voice Channel", "Join a voice channel first!", color=0xFF0000),
-                ephemeral=True
-            )
+                embed=mk_embed("❌ No Voice Channel", "Join a voice channel first!", color=0xFF0000), ephemeral=True)
         vc = interaction.guild.voice_client
         if not vc:
             vc = await interaction.user.voice.channel.connect(timeout=8.0, reconnect=True, self_deaf=True)
         elif vc.channel != interaction.user.voice.channel:
             await vc.move_to(interaction.user.voice.channel)
-
         embed = discord.Embed(title="🔍 Loading...", description=f"```{query}```", color=0xFFAA00)
         embed.set_footer(text="🎵 NinjuBot | Made by sdb_darkninja")
         await interaction.response.send_message(embed=embed)
         q = get_queue(interaction.guild.id)
-
         try:
-            result = await asyncio.wait_for(
-                resolve_source(query, self.bot.loop, self.session), timeout=15.0
-            )
+            result = await asyncio.wait_for(resolve_source(query, self.bot.loop, self.session), timeout=15.0)
         except Exception as e:
-            return await interaction.edit_original_response(
-                embed=mk_embed("❌ Error", str(e), color=0xFF0000)
-            )
-
+            return await interaction.edit_original_response(embed=mk_embed("❌ Error", str(e), color=0xFF0000))
         q.add(result)
-
         class FakeCtx:
             def __init__(self, guild, voice_client, channel, bot):
-                self.guild = guild
-                self.voice_client = voice_client
-                self.channel = channel
-                self.bot = bot
+                self.guild = guild; self.voice_client = voice_client
+                self.channel = channel; self.bot = bot
             async def send(self, **kwargs):
                 await interaction.channel.send(**kwargs)
-
         fake_ctx = FakeCtx(interaction.guild, vc, interaction.channel, self.bot)
-
         if vc.is_playing() or vc.is_paused():
             embed = discord.Embed(title="➕ Added to Queue", color=0x1DB954)
             embed.add_field(name="Track", value=f"**[{result['title']}]({result['webpage_url']})**", inline=False)
@@ -571,9 +525,7 @@ class Music(commands.Cog):
             embed.set_footer(text="🎵 NinjuBot | Made by sdb_darkninja")
             await interaction.edit_original_response(embed=embed)
         else:
-            await interaction.edit_original_response(
-                embed=mk_embed("✅ Found", f"**{result['title']}**\nStarting...", color=0x1DB954)
-            )
+            await interaction.edit_original_response(embed=mk_embed("✅ Found", f"**{result['title']}**\nStarting...", color=0x1DB954))
             await self.play_next(fake_ctx)
 
     @slash_play.autocomplete("query")
@@ -590,10 +542,7 @@ class Music(commands.Cog):
                 data = await resp.json(content_type=None)
                 suggestions = data[1][:8]
                 if suggestions:
-                    return [
-                        discord.app_commands.Choice(name=s[:100], value=s[:100])
-                        for s in suggestions if isinstance(s, str)
-                    ]
+                    return [discord.app_commands.Choice(name=s[:100], value=s[:100]) for s in suggestions if isinstance(s, str)]
         except Exception as e:
             print(f"[Autocomplete] {e}")
         return [discord.app_commands.Choice(name=current[:100], value=current[:100])]

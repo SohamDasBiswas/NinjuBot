@@ -2,8 +2,6 @@ import discord
 from discord.ext import commands
 from datetime import datetime, timezone
 
-# ── Help Menu with Buttons ────────────────────────────────────────────────────
-
 PAGES = {
     "🎵 Music": {
         "color": 0x1DB954,
@@ -11,7 +9,7 @@ PAGES = {
             ("Playback", "`/play` or `-p <song>` — Play with live suggestions\n`-skip` `-pause` `-resume` `-stop` `-np`\n`-queue` `-loop [song/queue/none]` `-volume <1-100>`"),
             ("Discovery", "`-search <query>` — Pick from top 5 results\n`-radio <genre>` — pop, hiphop, rock, lofi, jazz, bollywood\n`-lyrics [song]` — Fetch song lyrics"),
             ("Queue Tools", "`-shuffle` — Randomize queue\n`-remove <#>` — Remove song by position\n`-247` — Stay in VC forever\n`-eq <effect>` — bassboost, nightcore, vaporwave"),
-            ("Playlists", "`-playlist save <name>` — Save current queue\n`-playlist play <name>` — Load saved playlist\n`-playlist list` — Show all playlists\n`-playlist delete <name>` — Delete playlist"),
+            ("Playlists", "`-playlist save <n>` — Save current queue\n`-playlist play <n>` — Load saved playlist\n`-playlist list` — Show all playlists\n`-playlist delete <n>` — Delete playlist"),
         ]
     },
     "📊 Twitch": {
@@ -67,7 +65,7 @@ class HelpSelect(discord.ui.Select):
         embed.set_thumbnail(url=interaction.client.user.display_avatar.url)
         for fname, fval in page["fields"]:
             embed.add_field(name=fname, value=fval, inline=False)
-        embed.set_footer(text="NinjuBot | Made by sdb_darkninja 🔥 | Use -help to reopen")
+        embed.set_footer(text="NinjuBot | Made by sdb_darkninja 🔥")
         await interaction.response.edit_message(embed=embed, view=self.view)
 
 class HelpView(discord.ui.View):
@@ -80,9 +78,9 @@ class HelpView(discord.ui.View):
         embed = make_home_embed(interaction.client)
         await interaction.response.edit_message(embed=embed, view=self)
 
-    @discord.ui.button(label="Support", emoji="💬", style=discord.ButtonStyle.secondary, row=1, url="https://discord.gg/")
-    async def support(self, interaction: discord.Interaction, button: discord.ui.Button):
-        pass
+    @discord.ui.button(label="Twitch", emoji="🎮", style=discord.ButtonStyle.secondary, row=1)
+    async def twitch_link(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message("🎮 Twitch: https://twitch.tv/sdb_darkninja", ephemeral=True)
 
     async def on_timeout(self):
         for item in self.children:
@@ -111,7 +109,6 @@ def make_home_embed(client):
     embed.set_footer(text="NinjuBot | Made by sdb_darkninja 🔥 | Prefix: -")
     embed.timestamp = datetime.now(timezone.utc)
     return embed
-
 
 class Info(commands.Cog):
     def __init__(self, bot):
