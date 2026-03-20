@@ -4,12 +4,44 @@ import asyncio
 import os
 from datetime import datetime, timezone
 from dotenv import load_dotenv
-from keep_alive import keep_alive
 from database import init_db
 
 load_dotenv()
 init_db()
 
+# Flask keep-alive
+from flask import Flask, jsonify
+from threading import Thread
+
+flask_app = Flask('')
+start_time = datetime.now(timezone.utc)
+
+@flask_app.route('/')
+def home():
+    return "✅ NinjuBot is alive!"
+
+@flask_app.route('/health')
+def health():
+    uptime = datetime.now(timezone.utc) - start_time
+    return jsonify({
+        "status": "online",
+        "uptime_seconds": int(uptime.total_seconds()),
+        "uptime": str(uptime).split(".")[0],
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    })
+
+def run_flask():
+    port = int(os.environ.get("PORT", 10000))
+    flask_app.run(host='0.0.0.0', port=port)
+
+# Start Flask in background thread FIRST
+t = Thread(target=run_flask)
+t.daemon = True
+t.start()
+
+print("✅ Flask started")
+
+# Now set up Discord bot
 STATUS_CHANNEL_ID = 1484110480699031672
 
 intents = discord.Intents.default()
@@ -50,7 +82,7 @@ async def send_status(title, description, color):
         embed.set_footer(text="NinjuBot Status")
         await channel.send(embed=embed)
     except Exception as e:
-        print(f"[Status] Failed to send notification: {e}")
+        print(f"[Status] Failed: {e}")
 
 @bot.event
 async def on_ready():
@@ -95,7 +127,8 @@ async def on_command_error(ctx, error):
 async def start_bot():
     token = os.getenv("DISCORD_TOKEN")
     if not token:
-        raise ValueError("DISCORD_TOKEN not set!")
+        print("❌ DISCORD_TOKEN not set!")
+        return
 
     for cog in COGS:
         try:
@@ -107,16 +140,18 @@ async def start_bot():
     retry_delay = 30
     while True:
         try:
-            print(f"🔄 Attempting to connect to Discord...")
+            print("🔄 Attempting to connect to Discord...")
             await bot.start(token)
             break
         except discord.errors.HTTPException as e:
             if e.status == 429:
                 print(f"⚠️ Rate limited. Waiting {retry_delay}s...")
                 await asyncio.sleep(retry_delay)
-                retry_delay = min(retry_delay * 2, 600)  # max 10 min
-                # Reset bot for reconnection
-                await bot.close()
+                retry_delay = min(retry_delay * 2, 600)
+                try:
+                    await bot.close()
+                except:
+                    pass
             else:
                 print(f"❌ HTTP error: {e}")
                 await asyncio.sleep(60)
@@ -124,5 +159,4 @@ async def start_bot():
             print(f"❌ Unexpected error: {e}")
             await asyncio.sleep(60)
 
-keep_alive()
 asyncio.run(start_bot())
