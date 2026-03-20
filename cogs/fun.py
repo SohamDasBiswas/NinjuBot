@@ -3,6 +3,167 @@ from discord.ext import commands
 import random
 import asyncio
 
+# ── Truth or Dare Data ────────────────────────────────────────────────────────
+
+TRUTHS = [
+    "What's the most embarrassing thing you've ever done?",
+    "Have you ever lied to get out of trouble? What was it?",
+    "What's your biggest fear?",
+    "Who was your first crush?",
+    "What's the most childish thing you still do?",
+    "Have you ever cheated on a test or game?",
+    "What's the worst gift you've ever received?",
+    "Have you ever blamed someone else for something you did?",
+    "What's a secret talent you have?",
+    "What's the most trouble you've ever been in?",
+    "Have you ever stalked someone's social media for hours?",
+    "What's the weirdest dream you've ever had?",
+    "What's one thing you would change about yourself?",
+    "Have you ever said 'I love you' and not meant it?",
+    "What's your most embarrassing nickname?",
+    "Have you ever sent a text to the wrong person?",
+    "What's the biggest lie you've ever told?",
+    "What's something you've never told anyone?",
+    "Have you ever pretended to be sick to skip something?",
+    "What's a bad habit you have that no one knows about?",
+    "Have you ever laughed at the wrong moment?",
+    "What's the most awkward situation you've been in?",
+    "What's one thing on your phone you wouldn't want others to see?",
+    "Have you ever fallen asleep in class or a meeting?",
+    "What's something you regret saying to someone?",
+]
+
+DARES = [
+    "Do your best impression of another member in this server!",
+    "Send the last meme you saved to this chat.",
+    "Type the next message with your elbows only.",
+    "Speak in an accent for the next 3 messages.",
+    "Change your nickname to something embarrassing for 10 minutes.",
+    "Send a voice message saying 'I am a potato' three times.",
+    "Post a selfie with a silly face.",
+    "Write a love poem for the person to your left (in the member list).",
+    "Say the alphabet backwards.",
+    "Act like a chicken for the next 2 minutes.",
+    "Describe the last person you texted using only emojis.",
+    "Do 10 push-ups right now and report back.",
+    "Send a compliment to every person currently online.",
+    "Change your profile picture to something funny for 1 hour.",
+    "Type only in CAPS for the next 5 messages.",
+    "Speak only in questions for the next 10 minutes.",
+    "Send a screenshot of your home screen.",
+    "Let someone else send one message from your account.",
+    "Tell a joke — if nobody laughs, do another dare.",
+    "Do your best robot dance and describe it in chat.",
+    "Send the most recent photo in your camera roll.",
+    "Write a haiku about the server.",
+    "Convince someone you're an AI for 2 messages.",
+    "Sing a song and post a voice clip of it.",
+    "Text your mom/dad 'I love you' and show proof.",
+]
+
+class TruthOrDareView(discord.ui.View):
+    def __init__(self, ctx, target: discord.Member):
+        super().__init__(timeout=60)
+        self.ctx = ctx
+        self.target = target
+
+    @discord.ui.button(label="Truth", emoji="🤔", style=discord.ButtonStyle.primary)
+    async def truth(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user != self.target and interaction.user != self.ctx.author:
+            return await interaction.response.send_message("❌ This isn't your game!", ephemeral=True)
+        question = random.choice(TRUTHS)
+        embed = discord.Embed(
+            title="🤔 TRUTH",
+            description=f"{self.target.mention} must answer honestly!\n\n**{question}**",
+            color=0x3498DB
+        )
+        embed.set_thumbnail(url=self.target.display_avatar.url)
+        embed.set_footer(text="🎭 NinjuBot Truth or Dare | Made by sdb_darkninja")
+        for item in self.children:
+            item.disabled = True
+        view = TruthOrDareAgainView(self.ctx, self.target)
+        await interaction.response.edit_message(embed=embed, view=view)
+
+    @discord.ui.button(label="Dare", emoji="🔥", style=discord.ButtonStyle.danger)
+    async def dare(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user != self.target and interaction.user != self.ctx.author:
+            return await interaction.response.send_message("❌ This isn't your game!", ephemeral=True)
+        dare = random.choice(DARES)
+        embed = discord.Embed(
+            title="🔥 DARE",
+            description=f"{self.target.mention} must complete this dare!\n\n**{dare}**",
+            color=0xFF4500
+        )
+        embed.set_thumbnail(url=self.target.display_avatar.url)
+        embed.set_footer(text="🎭 NinjuBot Truth or Dare | Made by sdb_darkninja")
+        view = TruthOrDareAgainView(self.ctx, self.target)
+        await interaction.response.edit_message(embed=embed, view=view)
+
+    @discord.ui.button(label="Random", emoji="🎲", style=discord.ButtonStyle.secondary)
+    async def random_choice(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user != self.target and interaction.user != self.ctx.author:
+            return await interaction.response.send_message("❌ This isn't your game!", ephemeral=True)
+        if random.random() > 0.5:
+            question = random.choice(TRUTHS)
+            embed = discord.Embed(
+                title="🎲 RANDOM → TRUTH",
+                description=f"{self.target.mention} got Truth!\n\n**{question}**",
+                color=0x3498DB
+            )
+        else:
+            dare = random.choice(DARES)
+            embed = discord.Embed(
+                title="🎲 RANDOM → DARE",
+                description=f"{self.target.mention} got Dare!\n\n**{dare}**",
+                color=0xFF4500
+            )
+        embed.set_thumbnail(url=self.target.display_avatar.url)
+        embed.set_footer(text="🎭 NinjuBot Truth or Dare | Made by sdb_darkninja")
+        view = TruthOrDareAgainView(self.ctx, self.target)
+        await interaction.response.edit_message(embed=embed, view=view)
+
+    async def on_timeout(self):
+        for item in self.children:
+            item.disabled = True
+
+class TruthOrDareAgainView(discord.ui.View):
+    def __init__(self, ctx, target: discord.Member):
+        super().__init__(timeout=120)
+        self.ctx = ctx
+        self.target = target
+
+    @discord.ui.button(label="Play Again", emoji="🔄", style=discord.ButtonStyle.success)
+    async def play_again(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(
+            title="🎭 Truth or Dare",
+            description=f"{self.target.mention} — choose your fate!",
+            color=0xFF6B9D
+        )
+        embed.set_thumbnail(url=self.target.display_avatar.url)
+        embed.set_footer(text="🎮 NinjuBot | Made by sdb_darkninja")
+        view = TruthOrDareView(self.ctx, self.target)
+        await interaction.response.edit_message(embed=embed, view=view)
+
+    @discord.ui.button(label="Change Player", emoji="👤", style=discord.ButtonStyle.secondary)
+    async def change_player(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            "Use `-tod @user` to challenge someone specific, or `-tod` to play yourself!",
+            ephemeral=True
+        )
+
+    @discord.ui.button(label="End Game", emoji="🛑", style=discord.ButtonStyle.danger)
+    async def end_game(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(
+            title="🎭 Game Over!",
+            description="Thanks for playing Truth or Dare! Use `-tod` to start again.",
+            color=0x808080
+        )
+        embed.set_footer(text="🎮 NinjuBot | Made by sdb_darkninja")
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(embed=embed, view=self)
+
+
 WORDLE_WORDS = [
     "apple", "brave", "crane", "dance", "eagle", "flame", "grace", "heart",
     "ivory", "joker", "kneel", "light", "music", "night", "ocean", "piano",
@@ -306,6 +467,23 @@ class Fun(commands.Cog):
             await ctx.send(embed=mk_embed("✊ RPS Result",
                 f"{ctx.author.mention}: {p1_choice} {choices[p1_choice]}\n"
                 f"{opponent.mention}: {p2_choice} {choices[p2_choice]}\n\n**{result}**", color=color))
+
+
+    # ── Truth or Dare ─────────────────────────────────────────────────────────
+    @commands.command(name="truthordare", aliases=["tod", "td"])
+    async def truth_or_dare(self, ctx, member: discord.Member = None):
+        """Start a Truth or Dare game! Optionally challenge a specific user."""
+        target = member or ctx.author
+        embed = discord.Embed(
+            title="🎭 Truth or Dare",
+            description=f"{target.mention} — choose your fate!",
+            color=0xFF6B9D
+        )
+        embed.set_thumbnail(url=target.display_avatar.url)
+        embed.set_footer(text="🎮 NinjuBot | Made by sdb_darkninja")
+        view = TruthOrDareView(ctx, target)
+        await ctx.send(embed=embed, view=view)
+
 
 async def setup(bot):
     await bot.add_cog(Fun(bot))
