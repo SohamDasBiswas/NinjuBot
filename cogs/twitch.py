@@ -2,60 +2,15 @@ import discord
 from discord.ext import commands, tasks
 import aiohttp
 import os
-from database import get_conn
+from database import load_twitch_channels, save_twitch_channel, delete_twitch_channel
 
 TWITCH_USERNAME = "sdb_darkninja"
-
-def init_twitch_table():
-    conn = get_conn()
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS twitch_channels (
-            guild_id TEXT PRIMARY KEY,
-            followers_vc TEXT,
-            status_vc TEXT,
-            viewers_vc TEXT,
-            game_vc TEXT
-        )
-    """)
-    conn.commit()
-    conn.close()
-
-def load_channel_ids():
-    init_twitch_table()
-    conn = get_conn()
-    rows = conn.execute("SELECT * FROM twitch_channels").fetchall()
-    conn.close()
-    result = {}
-    for row in rows:
-        result[int(row["guild_id"])] = {
-            "followers": int(row["followers_vc"]),
-            "status":    int(row["status_vc"]),
-            "viewers":   int(row["viewers_vc"]),
-            "game":      int(row["game_vc"]),
-        }
-    return result
-
-def save_channel_ids(guild_id, ids):
-    init_twitch_table()
-    conn = get_conn()
-    conn.execute("""
-        INSERT INTO twitch_channels (guild_id, followers_vc, status_vc, viewers_vc, game_vc)
-        VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(guild_id) DO UPDATE SET
-            followers_vc=excluded.followers_vc,
-            status_vc=excluded.status_vc,
-            viewers_vc=excluded.viewers_vc,
-            game_vc=excluded.game_vc
-    """, (str(guild_id), str(ids["followers"]), str(ids["status"]),
-          str(ids["viewers"]), str(ids["game"])))
-    conn.commit()
-    conn.close()
 
 class Twitch(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.access_token = None
-        self.channel_ids = load_channel_ids()
+        self.channel_ids = load_twitch_channels()
 
     async def get_token(self):
         client_id = os.getenv("TWITCH_CLIENT_ID")
@@ -112,7 +67,6 @@ class Twitch(commands.Cog):
         if not stats:
             return await msg.edit(content=error)
         guild = ctx.guild
-        # If channels already exist and are valid, just update them
         if guild.id in self.channel_ids:
             ids = self.channel_ids[guild.id]
             if all(guild.get_channel(v) is not None for v in ids.values()):
@@ -136,9 +90,9 @@ class Twitch(commands.Cog):
         game_vc      = await guild.create_voice_channel(f"🪻 | Game : {stats['game'][:28]}", category=category, overwrites=overwrite)
         ids = {"followers": followers_vc.id, "status": status_vc.id, "viewers": viewers_vc.id, "game": game_vc.id}
         self.channel_ids[guild.id] = ids
-        save_channel_ids(guild.id, ids)
+        save_twitch_channel(guild.id, ids)
         embed = discord.Embed(title="✅ Twitch Analytics Ready!", description=f"📊 Tracking **{stats['username']}**\n📁 Category: **{category.name}**\n\nChannels auto-update every **5 minutes**.", color=0x9146FF)
-        embed.set_footer(text="NinjaBot | Made by sdb_darkninja")
+        embed.set_footer(text="NinjuBot | Made by sdb_darkninja")
         await msg.edit(content=None, embed=embed)
         if not self.update_twitch_channels.is_running():
             self.update_twitch_channels.start()
@@ -158,7 +112,7 @@ class Twitch(commands.Cog):
         embed.add_field(name="🪻 Game",      value=stats["game"],             inline=True)
         if stats["is_live"]:
             embed.add_field(name="📺 Title", value=stats["title"][:100], inline=False)
-        embed.set_footer(text="NinjaBot | Made by sdb_darkninja | Channels updated!")
+        embed.set_footer(text="NinjuBot | Made by sdb_darkninja | Channels updated!")
         await msg.edit(content=None, embed=embed)
 
     @commands.command(name="twitchreset")
@@ -167,10 +121,7 @@ class Twitch(commands.Cog):
         guild = ctx.guild
         if guild.id in self.channel_ids:
             del self.channel_ids[guild.id]
-            conn = get_conn()
-            conn.execute("DELETE FROM twitch_channels WHERE guild_id=?", (str(guild.id),))
-            conn.commit()
-            conn.close()
+            delete_twitch_channel(guild.id)
             await ctx.send("✅ Reset done. Run `-twitchsetup` to create fresh channels.")
         else:
             await ctx.send("⚠️ No Twitch setup found for this server.")
@@ -204,7 +155,7 @@ class Twitch(commands.Cog):
 
     @commands.Cog.listener()
     async def on_ready(self):
-        self.channel_ids = load_channel_ids()
+        self.channel_ids = load_twitch_channels()
         if self.channel_ids and not self.update_twitch_channels.is_running():
             self.update_twitch_channels.start()
 

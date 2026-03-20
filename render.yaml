@@ -7,6 +7,8 @@ services:
     envVars:
       - key: DISCORD_TOKEN
         sync: false
+      - key: MONGODB_URI
+        sync: false
       - key: SPOTIFY_CLIENT_ID
         sync: false
       - key: SPOTIFY_CLIENT_SECRET
@@ -19,11 +21,7 @@ services:
         sync: false
       - key: ANTHROPIC_API_KEY
         sync: false
-      - key: DB_PATH
-        value: /app/data/ninjubot.db
+      - key: OPENROUTER_API_KEY
+        sync: false
       - key: PORT
         value: 10000
-    disk:
-      name: ninjubot-data
-      mountPath: /app/data
-      sizeGB: 1
