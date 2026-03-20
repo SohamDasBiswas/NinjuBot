@@ -29,7 +29,6 @@ DISCORD_CLIENT_ID     = os.getenv('DISCORD_CLIENT_ID', '')
 DISCORD_CLIENT_SECRET = os.getenv('DISCORD_CLIENT_SECRET', '')
 DISCORD_API           = 'https://discord.com/api/v10'
 DASHBOARD_ORIGIN      = os.getenv('DASHBOARD_ORIGIN', 'https://sohamdasbiswas.github.io')
-OWNER_DISCORD_ID      = os.getenv('OWNER_DISCORD_ID', '')  # Your Discord user ID — only you see admin panels
 
 # ══════════════════════════════════════════════════════════════
 #  HELPERS
@@ -157,8 +156,7 @@ def auth_discord():
     except Exception as e:
         return jsonify({'error': f'Could not fetch user: {e}'}), 400
 
-    is_owner = bool(OWNER_DISCORD_ID) and str(user.get('id')) == str(OWNER_DISCORD_ID)
-    return jsonify({'access_token': access_token, 'user': user, 'is_owner': is_owner})
+    return jsonify({'access_token': access_token, 'user': user})
 
 
 @flask_app.route('/auth/guilds', methods=['GET', 'OPTIONS'])
@@ -185,17 +183,25 @@ def auth_guilds():
         bot_guilds_raw = bot_discord_get('/users/@me/guilds')
         bot_guild_ids  = {g['id'] for g in bot_guilds_raw} if isinstance(bot_guilds_raw, list) else set()
 
+    # Build a map of guild_id -> member_count from the live bot (most accurate)
+    bot_member_counts = {}
+    if _bot_ref and _bot_ref.is_ready():
+        for bg in _bot_ref.guilds:
+            bot_member_counts[str(bg.id)] = bg.member_count
+
     ADMINISTRATOR = 0x8
     result = []
     for g in user_guilds:
         perms    = int(g.get('permissions', 0))
         is_admin = bool(perms & ADMINISTRATOR) or g.get('owner', False)
         if is_admin and g['id'] in bot_guild_ids:
+            # Prefer live bot member count, fall back to Discord API value
+            member_count = bot_member_counts.get(g['id'], g.get('approximate_member_count', 0))
             result.append({
                 'id':                       g['id'],
                 'name':                     g['name'],
                 'icon':                     g.get('icon'),
-                'approximate_member_count': g.get('approximate_member_count', 0),
+                'approximate_member_count': member_count,
             })
 
     return jsonify(result)
