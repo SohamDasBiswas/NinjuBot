@@ -2,10 +2,13 @@ import discord
 from discord.ext import commands
 import random
 import asyncio
+import aiohttp
+import os
 
 # ── Truth or Dare Data ────────────────────────────────────────────────────────
 
-TRUTHS = [
+# Fallback lists (used if AI fails)
+TRUTHS_FALLBACK = [
     "What's the most embarrassing thing you've ever done?",
     "Have you ever lied to get out of trouble? What was it?",
     "What's your biggest fear?",
@@ -30,10 +33,10 @@ TRUTHS = [
     "What's the most awkward situation you've been in?",
     "What's one thing on your phone you wouldn't want others to see?",
     "Have you ever fallen asleep in class or a meeting?",
-    "What's something you regret saying to someone?",
+    "Kya tumne kabhi kisi ko ghante bhar stalk kiya social media pe?",
 ]
 
-DARES = [
+DARES_FALLBACK = [
     "Do your best impression of another member in this server!",
     "Send the last meme you saved to this chat.",
     "Type the next message with your elbows only.",
@@ -60,6 +63,46 @@ DARES = [
     "Sing a song and post a voice clip of it.",
     "Text your mom/dad 'I love you' and show proof.",
 ]
+
+# ── AI Generator ─────────────────────────────────────────────────────────────
+
+async def generate_tod_ai(mode: str) -> str:
+    """Generate a funny Hindi Truth or Dare using free AI (OpenRouter)."""
+    api_key = os.getenv("OPENROUTER_API_KEY")
+    if not api_key:
+        return None
+
+    prompt = (
+        f"Generate ONE funny and hilarious {mode} for a Truth or Dare game. "
+        f"Write ONLY in Hinglish (Hindi words written in English letters, like: Kya tune kabhi...). "
+        f"Make it funny, embarrassing, and suitable for friends. "
+        f"Do NOT use Hindi script. Just one sentence. No quotes, no numbering, no explanation."
+    )
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            resp = await session.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": "deepseek/deepseek-chat",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 100,
+                    "temperature": 0.9,
+                },
+                timeout=aiohttp.ClientTimeout(total=8)
+            )
+            data = await resp.json()
+            text = data["choices"][0]["message"]["content"].strip()
+            # Clean up any quotes or numbering
+            text = text.strip('"\' ').lstrip('0123456789.-)')
+            return text if len(text) > 10 else None
+    except Exception as e:
+        print(f"[ToD AI] {e}")
+        return None
 
 class TruthOrDareView(discord.ui.View):
     def __init__(self, ctx, target: discord.Member):

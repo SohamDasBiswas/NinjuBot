@@ -32,7 +32,7 @@ PAGES = {
             ("How it Works", "Earn **10-25 XP** per message (60s cooldown)\nLevel up formula: `Level = √(XP/100)`\nLevel-up announcement in chat automatically"),
         ]
     },
-    "₹ Economy": {
+    "💰 Economy": {
         "color": 0xF1C40F,
         "fields": [
             ("Earning", "`-balance [@user]` — Check wallet\n`-daily` — Claim ₹100-300 daily\n`-work` — Earn ₹30-100 (1h cooldown)\n`-give @user <amount>` — Transfer coins"),
@@ -94,7 +94,7 @@ def make_home_embed(client):
             "**Select a category below** to explore commands.\n\n"
             "**Quick Start:**\n"
             "🎵 `/play <song>` — Play music instantly\n"
-            "₹ `-daily` — Claim your daily coins\n"
+            "💰 `-daily` — Claim your daily coins\n"
             "🤖 `-ask <question>` — Chat with AI\n"
             "🎮 `-wordle` — Play Wordle"
         ),
@@ -102,7 +102,7 @@ def make_home_embed(client):
     )
     embed.add_field(
         name="📦 Categories",
-        value="🎵 Music • 📊 Twitch • 🤖 AI\n📈 Levels • ₹ Economy • 🎮 Fun",
+        value="🎵 Music • 📊 Twitch • 🤖 AI\n📈 Levels • 💰 Economy • 🎮 Fun",
         inline=False
     )
     embed.set_thumbnail(url=client.user.display_avatar.url)
