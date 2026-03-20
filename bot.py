@@ -292,6 +292,16 @@ def update_settings():
 #  LEADERBOARDS
 # ══════════════════════════════════════════════════════════════
 
+def resolve_username(user_id: str) -> str:
+    """Try to resolve a Discord user ID to a display name using the bot cache."""
+    if _bot_ref and _bot_ref.is_ready():
+        user = _bot_ref.get_user(int(user_id))
+        if user:
+            return user.display_name or user.name
+    return f'User {str(user_id)[-4:]}'  # fallback: last 4 digits of ID
+
+
+
 @flask_app.route('/economy/leaderboard', methods=['GET', 'OPTIONS'])
 def economy_leaderboard():
     if flask_request.method == 'OPTIONS':
@@ -307,7 +317,7 @@ def economy_leaderboard():
     # collection is called 'currency' in database.py
     docs = list(get_db().currency.find(query, {'_id': 0, 'user_id': 1, 'balance': 1}).sort('balance', -1).limit(10))
     # rename fields to match what dashboard expects
-    result = [{'user_id': d.get('user_id'), 'username': d.get('user_id', '?'), 'balance': d.get('balance', 0)} for d in docs]
+    result = [{'user_id': d.get('user_id'), 'username': resolve_username(str(d.get('user_id', '0'))), 'balance': d.get('balance', 0)} for d in docs]
     return jsonify(result)
 
 @flask_app.route('/levels/leaderboard', methods=['GET', 'OPTIONS'])
@@ -323,7 +333,7 @@ def levels_leaderboard():
     guild_id = flask_request.args.get('guild_id')
     query = {'guild_id': str(guild_id)} if guild_id else {}
     docs = list(get_db().xp.find(query, {'_id': 0, 'user_id': 1, 'xp': 1, 'level': 1}).sort('xp', -1).limit(10))
-    result = [{'user_id': d.get('user_id'), 'username': d.get('user_id', '?'), 'xp': d.get('xp', 0), 'level': d.get('level', 0)} for d in docs]
+    result = [{'user_id': d.get('user_id'), 'username': resolve_username(str(d.get('user_id', '0'))), 'xp': d.get('xp', 0), 'level': d.get('level', 0)} for d in docs]
     return jsonify(result)
 
 # ══════════════════════════════════════════════════════════════
