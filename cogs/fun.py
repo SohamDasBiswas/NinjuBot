@@ -110,60 +110,76 @@ class TruthOrDareView(discord.ui.View):
         self.ctx = ctx
         self.target = target
 
+    async def _get_tod(self, mode: str) -> str:
+        text = await generate_tod_ai(mode)
+        if text:
+            return text
+        if mode == "truth":
+            return random.choice(TRUTHS_FALLBACK)
+        return random.choice(DARES_FALLBACK)
+
     @discord.ui.button(label="Truth", emoji="🤔", style=discord.ButtonStyle.primary)
     async def truth(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user != self.target and interaction.user != self.ctx.author:
             return await interaction.response.send_message("❌ This isn't your game!", ephemeral=True)
-        question = random.choice(TRUTHS)
+        await interaction.response.defer()
+        loading = discord.Embed(title="🤔 TRUTH", description="AI soch raha hai... 🤖", color=0x3498DB)
+        await interaction.edit_original_response(embed=loading, view=None)
+        question = await self._get_tod("truth")
         embed = discord.Embed(
-            title="🤔 TRUTH",
-            description=f"{self.target.mention} must answer honestly!\n\n**{question}**",
+            title="🤔 TRUTH — Sachchi Baat Bol!",
+            description=f"{self.target.mention} ko jawab dena padega! 😏\n\n**{question}**",
             color=0x3498DB
         )
         embed.set_thumbnail(url=self.target.display_avatar.url)
         embed.set_footer(text="🎭 NinjuBot Truth or Dare | Made by sdb_darkninja")
-        for item in self.children:
-            item.disabled = True
         view = TruthOrDareAgainView(self.ctx, self.target)
-        await interaction.response.edit_message(embed=embed, view=view)
+        await interaction.edit_original_response(embed=embed, view=view)
 
     @discord.ui.button(label="Dare", emoji="🔥", style=discord.ButtonStyle.danger)
     async def dare(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user != self.target and interaction.user != self.ctx.author:
             return await interaction.response.send_message("❌ This isn't your game!", ephemeral=True)
-        dare = random.choice(DARES)
+        await interaction.response.defer()
+        loading = discord.Embed(title="🔥 DARE", description="AI dare soch raha hai... 🤖", color=0xFF4500)
+        await interaction.edit_original_response(embed=loading, view=None)
+        dare = await self._get_tod("dare")
         embed = discord.Embed(
-            title="🔥 DARE",
-            description=f"{self.target.mention} must complete this dare!\n\n**{dare}**",
+            title="🔥 DARE — Himmat Hai Toh Kar!",
+            description=f"{self.target.mention} ko yeh karna padega! 😈\n\n**{dare}**",
             color=0xFF4500
         )
         embed.set_thumbnail(url=self.target.display_avatar.url)
         embed.set_footer(text="🎭 NinjuBot Truth or Dare | Made by sdb_darkninja")
         view = TruthOrDareAgainView(self.ctx, self.target)
-        await interaction.response.edit_message(embed=embed, view=view)
+        await interaction.edit_original_response(embed=embed, view=view)
 
     @discord.ui.button(label="Random", emoji="🎲", style=discord.ButtonStyle.secondary)
     async def random_choice(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user != self.target and interaction.user != self.ctx.author:
             return await interaction.response.send_message("❌ This isn't your game!", ephemeral=True)
-        if random.random() > 0.5:
-            question = random.choice(TRUTHS)
+        await interaction.response.defer()
+        is_truth = random.random() > 0.5
+        mode = "truth" if is_truth else "dare"
+        loading = discord.Embed(title="🎲 RANDOM", description="AI decide kar raha hai... 🤖", color=0x9B59B6)
+        await interaction.edit_original_response(embed=loading, view=None)
+        text = await self._get_tod(mode)
+        if is_truth:
             embed = discord.Embed(
-                title="🎲 RANDOM → TRUTH",
-                description=f"{self.target.mention} got Truth!\n\n**{question}**",
+                title="🎲 RANDOM → TRUTH 🤔",
+                description=f"{self.target.mention} ko Truth mila! Sachchi bol!\n\n**{text}**",
                 color=0x3498DB
             )
         else:
-            dare = random.choice(DARES)
             embed = discord.Embed(
-                title="🎲 RANDOM → DARE",
-                description=f"{self.target.mention} got Dare!\n\n**{dare}**",
+                title="🎲 RANDOM → DARE 🔥",
+                description=f"{self.target.mention} ko Dare mila! Dar mat!\n\n**{text}**",
                 color=0xFF4500
             )
         embed.set_thumbnail(url=self.target.display_avatar.url)
         embed.set_footer(text="🎭 NinjuBot Truth or Dare | Made by sdb_darkninja")
         view = TruthOrDareAgainView(self.ctx, self.target)
-        await interaction.response.edit_message(embed=embed, view=view)
+        await interaction.edit_original_response(embed=embed, view=view)
 
     async def on_timeout(self):
         for item in self.children:
