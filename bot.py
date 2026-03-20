@@ -29,6 +29,7 @@ DISCORD_CLIENT_ID     = os.getenv('DISCORD_CLIENT_ID', '')
 DISCORD_CLIENT_SECRET = os.getenv('DISCORD_CLIENT_SECRET', '')
 DISCORD_API           = 'https://discord.com/api/v10'
 DASHBOARD_ORIGIN      = os.getenv('DASHBOARD_ORIGIN', 'https://sohamdasbiswas.github.io')
+OWNER_DISCORD_ID      = os.getenv('OWNER_DISCORD_ID', '')  # Your Discord user ID — only you see admin panels
 
 # ══════════════════════════════════════════════════════════════
 #  HELPERS
@@ -156,7 +157,8 @@ def auth_discord():
     except Exception as e:
         return jsonify({'error': f'Could not fetch user: {e}'}), 400
 
-    return jsonify({'access_token': access_token, 'user': user})
+    is_owner = bool(OWNER_DISCORD_ID) and str(user.get('id')) == str(OWNER_DISCORD_ID)
+    return jsonify({'access_token': access_token, 'user': user, 'is_owner': is_owner})
 
 
 @flask_app.route('/auth/guilds', methods=['GET', 'OPTIONS'])
@@ -400,6 +402,46 @@ def db_stats():
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+# ══════════════════════════════════════════════════════════════
+#  CHANNELS — fetch text channels for a guild
+# ══════════════════════════════════════════════════════════════
+
+@flask_app.route('/channels', methods=['GET', 'OPTIONS'])
+def get_channels():
+    """Return text channels for a guild so dashboard can show a dropdown."""
+    if flask_request.method == 'OPTIONS':
+        return _preflight()
+
+    # Manual auth check
+    auth = flask_request.headers.get('Authorization', '')
+    if not auth.startswith('Bearer '):
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    guild_id = flask_request.args.get('guild_id')
+    if not guild_id:
+        return jsonify({'error': 'guild_id required'}), 400
+
+    if _bot_ref and _bot_ref.is_ready():
+        guild = _bot_ref.get_guild(int(guild_id))
+        if guild:
+            channels = [
+                {'id': str(ch.id), 'name': ch.name, 'category': ch.category.name if ch.category else ''}
+                for ch in sorted(guild.text_channels, key=lambda c: (c.category.position if c.category else 0, c.position))
+            ]
+            return jsonify(channels)
+
+    # Fallback: use bot token to call Discord API
+    data = bot_discord_get(f'/guilds/{guild_id}/channels')
+    if isinstance(data, list):
+        channels = [
+            {'id': c['id'], 'name': c['name'], 'category': ''}
+            for c in data if c.get('type') == 0  # type 0 = text channel
+        ]
+        return jsonify(sorted(channels, key=lambda c: c['name']))
+
+    return jsonify([])
 
 # ══════════════════════════════════════════════════════════════
 #  CORS preflight helper
