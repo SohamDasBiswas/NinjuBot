@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.10-slim
 
 RUN apt-get update && apt-get install -y \
     ffmpeg \
@@ -6,6 +6,7 @@ RUN apt-get update && apt-get install -y \
     libffi-dev \
     libnacl-dev \
     git \
+    libssl-dev \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 

@@ -11,12 +11,6 @@ def get_db():
     uri = os.getenv("MONGODB_URI", "")
     if not uri:
         raise ValueError("MONGODB_URI not set!")
-
-    # Inject tlsInsecure into URI if not already present
-    if "tlsInsecure" not in uri and "tlsAllowInvalidCertificates" not in uri:
-        sep = "&" if "?" in uri else "?"
-        uri = uri + sep + "tls=true&tlsInsecure=true"
-
     _client = MongoClient(uri, serverSelectionTimeoutMS=30000)
     _db = _client["ninjubot"]
     print("✅ MongoDB connected")
@@ -37,104 +31,78 @@ def init_db():
 def get_balance(guild_id, user_id):
     key = f"{guild_id}_{user_id}"
     try:
-        db = get_db()
-        doc = db.currency.find_one({"key": key})
+        doc = get_db().currency.find_one({"key": key})
         if doc:
-            return {
-                "balance": doc.get("balance", 100),
-                "last_daily": doc.get("last_daily", 0),
-                "last_work": doc.get("last_work", 0),
-                "wins": doc.get("wins", 0),
-                "losses": doc.get("losses", 0),
-            }
+            return {k: doc.get(k, d) for k, d in [
+                ("balance", 100), ("last_daily", 0),
+                ("last_work", 0), ("wins", 0), ("losses", 0)
+            ]}
     except Exception as e:
-        print(f"[DB] get_balance error: {e}")
+        print(f"[DB] get_balance: {e}")
     return {"balance": 100, "last_daily": 0, "last_work": 0, "wins": 0, "losses": 0}
 
 def set_balance(guild_id, user_id, data):
     key = f"{guild_id}_{user_id}"
     try:
-        db = get_db()
-        db.currency.update_one(
+        get_db().currency.update_one(
             {"key": key},
-            {"$set": {
-                "key": key,
-                "guild_id": str(guild_id),
-                "user_id": str(user_id),
-                "balance": data.get("balance", 100),
-                "last_daily": data.get("last_daily", 0),
-                "last_work": data.get("last_work", 0),
-                "wins": data.get("wins", 0),
-                "losses": data.get("losses", 0),
-            }},
+            {"$set": {"key": key, "guild_id": str(guild_id), "user_id": str(user_id),
+                      "balance": data.get("balance", 100), "last_daily": data.get("last_daily", 0),
+                      "last_work": data.get("last_work", 0), "wins": data.get("wins", 0),
+                      "losses": data.get("losses", 0)}},
             upsert=True
         )
     except Exception as e:
-        print(f"[DB] set_balance error: {e}")
+        print(f"[DB] set_balance: {e}")
 
 def get_top_currency(guild_id, limit=10):
     try:
-        db = get_db()
-        docs = db.currency.find(
-            {"guild_id": str(guild_id)},
-            {"key": 1, "balance": 1}
-        ).sort("balance", -1).limit(limit)
-        return list(docs)
+        return list(get_db().currency.find(
+            {"guild_id": str(guild_id)}, {"key": 1, "balance": 1}
+        ).sort("balance", -1).limit(limit))
     except Exception as e:
-        print(f"[DB] get_top_currency error: {e}")
+        print(f"[DB] get_top_currency: {e}")
         return []
 
-# ── XP / Levels ───────────────────────────────────────────────────────────────
+# ── XP ────────────────────────────────────────────────────────────────────────
 
 def get_xp(guild_id, user_id):
     key = f"{guild_id}_{user_id}"
     try:
-        db = get_db()
-        doc = db.xp.find_one({"key": key})
+        doc = get_db().xp.find_one({"key": key})
         if doc:
             return {"xp": doc.get("xp", 0), "level": doc.get("level", 0)}
     except Exception as e:
-        print(f"[DB] get_xp error: {e}")
+        print(f"[DB] get_xp: {e}")
     return {"xp": 0, "level": 0}
 
 def set_xp(guild_id, user_id, data):
     key = f"{guild_id}_{user_id}"
     try:
-        db = get_db()
-        db.xp.update_one(
+        get_db().xp.update_one(
             {"key": key},
-            {"$set": {
-                "key": key,
-                "guild_id": str(guild_id),
-                "user_id": str(user_id),
-                "xp": data.get("xp", 0),
-                "level": data.get("level", 0),
-            }},
+            {"$set": {"key": key, "guild_id": str(guild_id), "user_id": str(user_id),
+                      "xp": data.get("xp", 0), "level": data.get("level", 0)}},
             upsert=True
         )
     except Exception as e:
-        print(f"[DB] set_xp error: {e}")
+        print(f"[DB] set_xp: {e}")
 
 def get_top_xp(guild_id, limit=10):
     try:
-        db = get_db()
-        docs = db.xp.find(
-            {"guild_id": str(guild_id)},
-            {"key": 1, "xp": 1, "level": 1}
-        ).sort("xp", -1).limit(limit)
-        return list(docs)
+        return list(get_db().xp.find(
+            {"guild_id": str(guild_id)}, {"key": 1, "xp": 1, "level": 1}
+        ).sort("xp", -1).limit(limit))
     except Exception as e:
-        print(f"[DB] get_top_xp error: {e}")
+        print(f"[DB] get_top_xp: {e}")
         return []
 
 # ── Twitch ────────────────────────────────────────────────────────────────────
 
 def load_twitch_channels():
     try:
-        db = get_db()
-        docs = db.twitch_channels.find({})
         result = {}
-        for doc in docs:
+        for doc in get_db().twitch_channels.find({}):
             result[int(doc["guild_id"])] = {
                 "followers": int(doc["followers_vc"]),
                 "status":    int(doc["status_vc"]),
@@ -143,34 +111,27 @@ def load_twitch_channels():
             }
         return result
     except Exception as e:
-        print(f"[DB] load_twitch_channels error: {e}")
+        print(f"[DB] load_twitch_channels: {e}")
         return {}
 
 def save_twitch_channel(guild_id, ids):
     try:
-        db = get_db()
-        db.twitch_channels.update_one(
+        get_db().twitch_channels.update_one(
             {"guild_id": str(guild_id)},
-            {"$set": {
-                "guild_id":     str(guild_id),
-                "followers_vc": str(ids["followers"]),
-                "status_vc":    str(ids["status"]),
-                "viewers_vc":   str(ids["viewers"]),
-                "game_vc":      str(ids["game"]),
-            }},
+            {"$set": {"guild_id": str(guild_id), "followers_vc": str(ids["followers"]),
+                      "status_vc": str(ids["status"]), "viewers_vc": str(ids["viewers"]),
+                      "game_vc": str(ids["game"])}},
             upsert=True
         )
     except Exception as e:
-        print(f"[DB] save_twitch_channel error: {e}")
+        print(f"[DB] save_twitch_channel: {e}")
 
 def delete_twitch_channel(guild_id):
     try:
-        db = get_db()
-        db.twitch_channels.delete_one({"guild_id": str(guild_id)})
+        get_db().twitch_channels.delete_one({"guild_id": str(guild_id)})
     except Exception as e:
-        print(f"[DB] delete_twitch_channel error: {e}")
+        print(f"[DB] delete_twitch_channel: {e}")
 
-# ── Legacy shim ───────────────────────────────────────────────────────────────
 def get_conn():
     class _P:
         def execute(self, *a, **k): return type('R', (), {'fetchall': lambda s: []})()
