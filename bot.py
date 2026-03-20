@@ -59,21 +59,13 @@ def bot_discord_get(endpoint):
     return r.json() if r.ok else {}
 
 def require_auth(f):
-    """Route decorator — validates the Discord Bearer token from dashboard."""
+    """Route decorator — just checks Bearer token is present, passes it through."""
     @wraps(f)
     def decorated(*args, **kwargs):
         auth = flask_request.headers.get('Authorization', '')
         if not auth.startswith('Bearer '):
             return jsonify({'error': 'Unauthorized'}), 401
-        token = auth.split(' ', 1)[1]
-        try:
-            user = discord_user_get('/users/@me', token)
-            if 'id' not in user:
-                raise ValueError('bad user')
-        except Exception:
-            return jsonify({'error': 'Invalid or expired token'}), 401
-        flask_request.discord_token = token
-        flask_request.discord_user  = user
+        flask_request.discord_token = auth.split(' ', 1)[1]
         return f(*args, **kwargs)
     return decorated
 
@@ -177,10 +169,14 @@ def auth_guilds():
     try:
         user_guilds = discord_user_get('/users/@me/guilds', flask_request.discord_token)
     except Exception as e:
-        return jsonify({'error': str(e)}), 400
+        return jsonify({'error': f'Could not fetch guilds: {e}'}), 400
 
-    # Build set of guild IDs the bot is currently in
-    bot_guild_ids = {str(g.id) for g in _bot_ref.guilds} if (_bot_ref and _bot_ref.is_ready()) else set()
+    # Get bot guild IDs — prefer live bot, fall back to Discord API
+    if _bot_ref and _bot_ref.is_ready():
+        bot_guild_ids = {str(g.id) for g in _bot_ref.guilds}
+    else:
+        bot_guilds_raw = bot_discord_get('/users/@me/guilds')
+        bot_guild_ids  = {g['id'] for g in bot_guilds_raw} if isinstance(bot_guilds_raw, list) else set()
 
     ADMINISTRATOR = 0x8
     result = []
