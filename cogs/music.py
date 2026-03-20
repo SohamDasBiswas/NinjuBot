@@ -27,7 +27,7 @@ def cache_set(key, value):
     _cache[key] = (value, time.time())
 
 YTDL_OPTIONS = {
-    "format": "bestaudio/best",
+    "format": "bestaudio/best[acodec!=none]/best",
     "noplaylist": False,
     "quiet": True,
     "no_warnings": True,
@@ -40,7 +40,7 @@ YTDL_OPTIONS = {
     "extract_flat": False,
     "geo_bypass": True,
     "nocheckcertificate": True,
-    "extractor_args": {"youtube": {"skip": ["dash", "hls"]}},
+    "youtube_include_dash_manifest": False,
 }
 if os.path.exists("cookies.txt"):
     YTDL_OPTIONS["cookiefile"] = "cookies.txt"
