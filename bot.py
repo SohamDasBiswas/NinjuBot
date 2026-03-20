@@ -347,20 +347,36 @@ def levels_leaderboard():
     scope    = flask_request.args.get('scope', 'server')  # 'server' or 'global'
 
     if scope == 'global' or not guild_id:
-        query = {}
+        # Global XP — separate collection, fixed rate
+        docs = list(get_db().xp_global.find(
+            {}, {'_id': 0, 'user_id': 1, 'xp': 1, 'level': 1}
+        ).sort('xp', -1).limit(10))
+        result = []
+        for d in docs:
+            uid = str(d.get('user_id', '0'))
+            result.append({
+                'user_id':  uid,
+                'username': resolve_username(uid),
+                'xp':       d.get('xp', 0),
+                'level':    d.get('level', 0),
+                'scope':    'global',
+            })
     else:
-        query = {'guild_id': str(guild_id)}
-
-    docs = list(get_db().xp.find(query, {'_id': 0, 'user_id': 1, 'guild_id': 1, 'xp': 1, 'level': 1}).sort('xp', -1).limit(10))
-    result = []
-    for d in docs:
-        uid = str(d.get('user_id', '0'))
-        result.append({
-            'user_id':  uid,
-            'username': resolve_username(uid),
-            'xp':       d.get('xp', 0),
-            'level':    d.get('level', 0),
-        })
+        # Server XP — configurable per-server
+        docs = list(get_db().xp.find(
+            {'guild_id': str(guild_id)},
+            {'_id': 0, 'user_id': 1, 'xp': 1, 'level': 1}
+        ).sort('xp', -1).limit(10))
+        result = []
+        for d in docs:
+            uid = str(d.get('user_id', '0'))
+            result.append({
+                'user_id':  uid,
+                'username': resolve_username(uid),
+                'xp':       d.get('xp', 0),
+                'level':    d.get('level', 0),
+                'scope':    'server',
+            })
     return jsonify(result)
 
 # ══════════════════════════════════════════════════════════════

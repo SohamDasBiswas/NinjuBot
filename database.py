@@ -21,6 +21,7 @@ def init_db():
         db = get_db()
         db.currency.create_index("key", unique=True)
         db.xp.create_index("key", unique=True)
+        db.xp_global.create_index("user_id", unique=True)
         db.twitch_channels.create_index("guild_id", unique=True)
         print("✅ MongoDB indexes created")
     except Exception as e:
@@ -95,6 +96,43 @@ def get_top_xp(guild_id, limit=10):
         ).sort("xp", -1).limit(limit))
     except Exception as e:
         print(f"[DB] get_top_xp: {e}")
+        return []
+
+
+# ── Global XP (fixed rate, cross-server) ─────────────────────────────────────
+
+GLOBAL_XP_MIN      = 15    # fixed — not configurable
+GLOBAL_XP_MAX      = 25
+GLOBAL_XP_COOLDOWN = 60    # seconds
+
+def get_global_xp(user_id):
+    key = str(user_id)
+    try:
+        doc = get_db().xp_global.find_one({"user_id": key})
+        if doc:
+            return {"xp": doc.get("xp", 0), "level": doc.get("level", 0)}
+    except Exception as e:
+        print(f"[DB] get_global_xp: {e}")
+    return {"xp": 0, "level": 0}
+
+def set_global_xp(user_id, data):
+    key = str(user_id)
+    try:
+        get_db().xp_global.update_one(
+            {"user_id": key},
+            {"$set": {"user_id": key, "xp": data.get("xp", 0), "level": data.get("level", 0)}},
+            upsert=True
+        )
+    except Exception as e:
+        print(f"[DB] set_global_xp: {e}")
+
+def get_top_global_xp(limit=10):
+    try:
+        return list(get_db().xp_global.find(
+            {}, {"user_id": 1, "xp": 1, "level": 1}
+        ).sort("xp", -1).limit(limit))
+    except Exception as e:
+        print(f"[DB] get_top_global_xp: {e}")
         return []
 
 # ── Twitch ────────────────────────────────────────────────────────────────────
