@@ -103,7 +103,7 @@ def stats():
         "icon":    str(g.icon.url) if g.icon else None,
     } for g in _bot_ref.guilds]
     return jsonify({
-        "bot_name":    str(_bot_ref.user),
+        "bot_name":    _bot_ref.user.name,
         "bot_id":      str(_bot_ref.user.id),
         "avatar":      str(_bot_ref.user.display_avatar.url),
         "guild_count": len(_bot_ref.guilds),
@@ -680,6 +680,7 @@ COGS = [
     "cogs.images",
     "cogs.currency",
     "cogs.info",
+    "cogs.moderation",
 ]
 
 def make_bot():
