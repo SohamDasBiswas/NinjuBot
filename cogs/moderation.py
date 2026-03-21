@@ -2,12 +2,6 @@ import discord
 from discord.ext import commands
 import datetime
 
-# Import the audit log writer from bot.py
-try:
-    from bot import log_mod_action
-except ImportError:
-    def log_mod_action(*a, **k): pass
-
 def mk_embed(title, desc, color=0xFF4500):
     e = discord.Embed(title=title, description=desc, color=color)
     e.timestamp = datetime.datetime.now(datetime.timezone.utc)
@@ -19,14 +13,18 @@ class Moderation(commands.Cog):
         self.bot = bot
 
     def log(self, action, target, moderator, reason='', guild=None):
-        log_mod_action(
-            action=action,
-            target=str(target),
-            moderator=str(moderator),
-            reason=reason or 'No reason provided',
-            guild_id=str(guild.id) if guild else '',
-            guild_name=guild.name if guild else ''
-        )
+        try:
+            from bot import log_mod_action
+            log_mod_action(
+                action=action,
+                target=str(target),
+                moderator=str(moderator),
+                reason=reason or 'No reason provided',
+                guild_id=str(guild.id) if guild else '',
+                guild_name=guild.name if guild else ''
+            )
+        except Exception as e:
+            print(f'[ModLog] {e}', flush=True)
 
     # ── Ban ──────────────────────────────────────────────────────
     @commands.command(name='ban')
