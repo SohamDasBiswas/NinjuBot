@@ -727,6 +727,16 @@ async def start_bot():
         async def on_ready():
             print(f"✅ Logged in as {bot.user} ({bot.user.id})", flush=True)
             print(f"📡 Connected to {len(bot.guilds)} server(s)", flush=True)
+            # Seed audit log with a startup entry so dashboard shows data immediately
+            for g in bot.guilds:
+                log_mod_action(
+                    action='bot_start',
+                    target=f'{bot.user}',
+                    moderator='System',
+                    reason=f'Bot connected to {len(bot.guilds)} servers',
+                    guild_id=str(g.id),
+                    guild_name=g.name
+                )
             try:
                 synced = await bot.tree.sync()
                 print(f"✅ Synced {len(synced)} global slash command(s)", flush=True)

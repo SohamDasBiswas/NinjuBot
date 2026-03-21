@@ -286,12 +286,6 @@ class AutoLogger(commands.Cog):
             do_log('voice_move', f'{member}', 'System',
                    f'#{before.channel.name} → #{after.channel.name}', member.guild)
 
-    # ── Boost events ───────────────────────────────────────────
-    @commands.Cog.listener()
-    async def on_member_update(self, before, after):
-        # Already handled above — this duplicate is intentional for boost detection
-        pass
-
     @commands.Cog.listener()
     async def on_guild_emojis_update(self, guild, before, after):
         added   = set(e.name for e in after) - set(e.name for e in before)
