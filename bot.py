@@ -380,7 +380,7 @@ def levels_leaderboard():
     return jsonify(result)
 
 # ══════════════════════════════════════════════════════════════
-#  AUDIT LOG
+#  AUDIT LOG (MongoDB — bot-logged events)
 # ══════════════════════════════════════════════════════════════
 
 @flask_app.route('/audit/log', methods=['GET', 'OPTIONS'])
@@ -388,7 +388,6 @@ def audit_log():
     if flask_request.method == 'OPTIONS':
         return _preflight()
 
-    # Manual auth check (OPTIONS must bypass @require_auth for CORS preflight to work)
     auth = flask_request.headers.get('Authorization', '')
     if not auth.startswith('Bearer '):
         return jsonify({'error': 'Unauthorized'}), 401
@@ -396,11 +395,77 @@ def audit_log():
     guild_id = flask_request.args.get('guild_id')
     limit    = min(int(flask_request.args.get('limit', 100)), 500)
     query    = {'guild_id': str(guild_id)} if guild_id else {}
+    # Exclude bot startup noise
+    query['action'] = {'$nin': ['bot_start', 'bot_stop', 'bot_restart', 'bot_connect', 'bot_ready']}
     docs     = list(get_db().audit_log.find(query, {'_id': 0}).sort('timestamp', -1).limit(limit))
     for d in docs:
         if isinstance(d.get('timestamp'), datetime.datetime):
             d['timestamp'] = d['timestamp'].isoformat()
     return jsonify({'entries': docs})
+
+
+# ══════════════════════════════════════════════════════════════
+#  DISCORD NATIVE AUDIT LOG (real server events from Discord)
+# ══════════════════════════════════════════════════════════════
+
+@flask_app.route('/guild/audit-log', methods=['GET', 'OPTIONS'])
+def guild_audit_log():
+    if flask_request.method == 'OPTIONS':
+        return _preflight()
+
+    auth = flask_request.headers.get('Authorization', '')
+    if not auth.startswith('Bearer '):
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    guild_id = flask_request.args.get('guild_id')
+    limit    = min(int(flask_request.args.get('limit', 100)), 100)
+
+    if not guild_id:
+        return jsonify({'error': 'guild_id required'}), 400
+
+    if not _bot_ref or not _bot_ref.is_ready():
+        return jsonify({'error': 'Bot not ready'}), 503
+
+    guild = _bot_ref.get_guild(int(guild_id))
+    if not guild:
+        return jsonify({'error': 'Guild not found'}), 404
+
+    # Fetch Discord native audit logs from bot's async loop
+    async def _fetch():
+        entries = []
+        async for entry in guild.audit_logs(limit=limit):
+            action_name = str(entry.action).split('.')[-1].lower()
+            target = 'Unknown'
+            try:
+                if hasattr(entry.target, 'name'):
+                    target = f'{entry.target.name} ({entry.target.id})'
+                elif entry.target:
+                    target = str(entry.target.id)
+            except Exception:
+                pass
+            moderator = 'Unknown'
+            try:
+                if entry.user:
+                    moderator = f'{entry.user.name}#{entry.user.discriminator}'
+            except Exception:
+                pass
+            entries.append({
+                'action':     action_name,
+                'target':     target,
+                'moderator':  moderator,
+                'reason':     entry.reason or '',
+                'guild_id':   str(guild.id),
+                'guild_name': guild.name,
+                'timestamp':  entry.created_at.isoformat(),
+            })
+        return entries
+
+    try:
+        future = asyncio.run_coroutine_threadsafe(_fetch(), _bot_ref.loop)
+        entries = future.result(timeout=10)
+        return jsonify({'entries': entries})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 # ══════════════════════════════════════════════════════════════
 #  BOOSTER STATS
@@ -727,16 +792,6 @@ async def start_bot():
         async def on_ready():
             print(f"✅ Logged in as {bot.user} ({bot.user.id})", flush=True)
             print(f"📡 Connected to {len(bot.guilds)} server(s)", flush=True)
-            # Seed audit log with a startup entry so dashboard shows data immediately
-            for g in bot.guilds:
-                log_mod_action(
-                    action='bot_start',
-                    target=f'{bot.user}',
-                    moderator='System',
-                    reason=f'Bot connected to {len(bot.guilds)} servers',
-                    guild_id=str(g.id),
-                    guild_name=g.name
-                )
             try:
                 synced = await bot.tree.sync()
                 print(f"✅ Synced {len(synced)} global slash command(s)", flush=True)
