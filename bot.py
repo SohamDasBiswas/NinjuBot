@@ -435,20 +435,35 @@ def guild_audit_log():
         entries = []
         async for entry in guild.audit_logs(limit=limit):
             action_name = str(entry.action).split('.')[-1].lower()
+
+            # Clean target name — no IDs
             target = 'Unknown'
             try:
-                if hasattr(entry.target, 'name'):
-                    target = f'{entry.target.name} ({entry.target.id})'
-                elif entry.target:
-                    target = str(entry.target.id)
+                t = entry.target
+                if hasattr(t, 'display_name'):
+                    target = t.display_name
+                elif hasattr(t, 'name'):
+                    target = t.name
+                elif hasattr(t, 'code'):
+                    target = t.code  # invites
+                elif t is not None:
+                    target = str(t)
+                # Strip trailing (#0 discriminator for new usernames)
+                if target.endswith('#0'):
+                    target = target[:-2]
             except Exception:
                 pass
+
+            # Clean moderator name — no IDs
             moderator = 'Unknown'
             try:
                 if entry.user:
-                    moderator = f'{entry.user.name}#{entry.user.discriminator}'
+                    moderator = entry.user.display_name or entry.user.name
+                    if moderator.endswith('#0'):
+                        moderator = moderator[:-2]
             except Exception:
                 pass
+
             entries.append({
                 'action':     action_name,
                 'target':     target,
