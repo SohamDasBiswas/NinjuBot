@@ -380,13 +380,15 @@ def levels_leaderboard():
     return jsonify(result)
 
 # ══════════════════════════════════════════════════════════════
-#  AUDIT LOG (bot MongoDB — internal mod actions only)
+#  AUDIT LOG
 # ══════════════════════════════════════════════════════════════
 
 @flask_app.route('/audit/log', methods=['GET', 'OPTIONS'])
 def audit_log():
     if flask_request.method == 'OPTIONS':
         return _preflight()
+
+    # Manual auth check (OPTIONS must bypass @require_auth for CORS preflight to work)
     auth = flask_request.headers.get('Authorization', '')
     if not auth.startswith('Bearer '):
         return jsonify({'error': 'Unauthorized'}), 401
@@ -400,353 +402,138 @@ def audit_log():
             d['timestamp'] = d['timestamp'].isoformat()
     return jsonify({'entries': docs})
 
-
 # ══════════════════════════════════════════════════════════════
-#  SERVER AUDIT LOG — Discord native, stored in separate collection
-# ══════════════════════════════════════════════════════════════
-
-def _clean_name(val):
-    """Strip Discord IDs and #0 discriminator from display names."""
-    if not val:
-        return 'Unknown'
-    import re
-    val = re.sub(r'\s*\(\d{10,20}\)', '', str(val))
-    val = re.sub(r'#0$', '', val)
-    return val.strip() or 'Unknown'
-
-
-@flask_app.route('/server/audit-log', methods=['GET', 'OPTIONS'])
-def server_audit_log():
-    """
-    Fetches Discord's native server audit log.
-    - Tries the live bot (guild.audit_logs) for fresh data
-    - Stores results in a separate 'server_audit_log' MongoDB collection
-    - Falls back to stored entries if bot is unavailable
-    """
-    if flask_request.method == 'OPTIONS':
-        return _preflight()
-    auth = flask_request.headers.get('Authorization', '')
-    if not auth.startswith('Bearer '):
-        return jsonify({'error': 'Unauthorized'}), 401
-
-    guild_id = flask_request.args.get('guild_id')
-    limit    = min(int(flask_request.args.get('limit', 100)), 100)
-
-    if not guild_id:
-        return jsonify({'error': 'guild_id required'}), 400
-
-    db = get_db()
-
-    # Try live Discord audit log via bot
-    if _bot_ref and _bot_ref.is_ready():
-        guild = _bot_ref.get_guild(int(guild_id))
-        if guild:
-            async def _fetch():
-                import discord as _discord
-
-                # Human-readable permission names
-                PERM_NAMES = {
-                    'administrator': 'Admin', 'manage_guild': 'Manage Server',
-                    'manage_roles': 'Manage Roles', 'manage_channels': 'Manage Channels',
-                    'kick_members': 'Kick', 'ban_members': 'Ban',
-                    'manage_messages': 'Manage Messages', 'mention_everyone': 'Mention Everyone',
-                    'moderate_members': 'Timeout Members', 'manage_nicknames': 'Manage Nicknames',
-                    'view_audit_log': 'View Audit Log', 'manage_webhooks': 'Manage Webhooks',
-                    'manage_expressions': 'Manage Emojis',
-                }
-
-                def perm_list(perms):
-                    if perms is None:
-                        return ''
-                    enabled = [PERM_NAMES.get(k, k.replace('_', ' ').title())
-                               for k, v in iter(perms) if v]
-                    return ', '.join(enabled[:6]) + (f' +{len(enabled)-6} more' if len(enabled) > 6 else '')
-
-                entries = []
-                async for entry in guild.audit_logs(limit=limit):
-                    action_name = str(entry.action).split('.')[-1].lower()
-
-                    # Target name
-                    target = 'Unknown'
-                    try:
-                        t = entry.target
-                        if hasattr(t, 'display_name') and t.display_name:
-                            target = _clean_name(t.display_name)
-                        elif hasattr(t, 'name') and t.name:
-                            target = _clean_name(t.name)
-                        elif hasattr(t, 'code'):
-                            target = str(t.code)
-                    except Exception:
-                        pass
-
-                    # Moderator name
-                    moderator = 'System'
-                    try:
-                        if entry.user:
-                            moderator = _clean_name(entry.user.display_name or entry.user.name)
-                    except Exception:
-                        pass
-
-                    detail = ''
-                    try:
-                        bef = entry.changes.before
-                        aft = entry.changes.after
-
-                        # ── Role given/removed to a member ──────────────────
-                        if action_name == 'member_role_update':
-                            added   = getattr(aft, 'roles', []) or []
-                            removed = getattr(bef, 'roles', []) or []
-                            parts = []
-                            if added:
-                                parts.append('➕ ' + ', '.join(f'@{r.name}' for r in added))
-                            if removed:
-                                parts.append('➖ ' + ', '.join(f'@{r.name}' for r in removed))
-                            detail = ' | '.join(parts)
-
-                        # ── Member nick/role change ──────────────────────────
-                        elif action_name == 'member_update':
-                            parts = []
-                            b_nick = getattr(bef, 'nick', None)
-                            a_nick = getattr(aft, 'nick', None)
-                            if b_nick != a_nick:
-                                parts.append(f'Nick: "{b_nick or "none"}" → "{a_nick or "none"}"')
-                            b_roles = getattr(bef, 'roles', None)
-                            a_roles = getattr(aft, 'roles', None)
-                            if a_roles is not None and b_roles is not None:
-                                added   = [r for r in a_roles if r not in b_roles]
-                                removed = [r for r in b_roles if r not in a_roles]
-                                if added:
-                                    parts.append('Role added: ' + ', '.join(f'@{r.name}' for r in added))
-                                if removed:
-                                    parts.append('Role removed: ' + ', '.join(f'@{r.name}' for r in removed))
-                            b_timed = getattr(bef, 'timed_out_until', None)
-                            a_timed = getattr(aft, 'timed_out_until', None)
-                            if a_timed and not b_timed:
-                                parts.append(f'Timed out until {a_timed.strftime("%Y-%m-%d %H:%M UTC")}')
-                            elif b_timed and not a_timed:
-                                parts.append('Timeout removed')
-                            detail = ' | '.join(parts)
-
-                        # ── Role created ─────────────────────────────────────
-                        elif action_name == 'role_create':
-                            perms = getattr(aft, 'permissions', None)
-                            pl = perm_list(perms)
-                            detail = f'Permissions: {pl}' if pl else 'No special permissions'
-
-                        # ── Role deleted ─────────────────────────────────────
-                        elif action_name == 'role_delete':
-                            perms = getattr(bef, 'permissions', None)
-                            pl = perm_list(perms)
-                            detail = f'Had permissions: {pl}' if pl else ''
-
-                        # ── Role updated ─────────────────────────────────────
-                        elif action_name == 'role_update':
-                            parts = []
-                            b_name = getattr(bef, 'name', None)
-                            a_name = getattr(aft, 'name', None)
-                            if b_name and a_name and b_name != a_name:
-                                parts.append(f'Renamed: @{b_name} → @{a_name}')
-                            b_perms = getattr(bef, 'permissions', None)
-                            a_perms = getattr(aft, 'permissions', None)
-                            if a_perms and b_perms:
-                                gained = [PERM_NAMES.get(k, k) for k, v in iter(a_perms) if v and not getattr(b_perms, k, False)]
-                                lost   = [PERM_NAMES.get(k, k) for k, v in iter(b_perms) if v and not getattr(a_perms, k, False)]
-                                if gained:
-                                    parts.append('Gained: ' + ', '.join(gained))
-                                if lost:
-                                    parts.append('Lost: ' + ', '.join(lost))
-                            b_color = getattr(bef, 'colour', None)
-                            a_color = getattr(aft, 'colour', None)
-                            if b_color and a_color and str(b_color) != str(a_color):
-                                parts.append(f'Colour: {a_color}')
-                            detail = ' | '.join(parts)
-
-                        # ── Channel update ───────────────────────────────────
-                        elif action_name == 'channel_update':
-                            parts = []
-                            b_name = getattr(bef, 'name', None)
-                            a_name = getattr(aft, 'name', None)
-                            if b_name and a_name and b_name != a_name:
-                                parts.append(f'#{b_name} → #{a_name}')
-                                target = a_name  # update target to new name
-                            b_topic = getattr(bef, 'topic', None)
-                            a_topic = getattr(aft, 'topic', None)
-                            if b_topic != a_topic:
-                                parts.append('Topic updated')
-                            b_slow = getattr(bef, 'slowmode_delay', None)
-                            a_slow = getattr(aft, 'slowmode_delay', None)
-                            if b_slow != a_slow and a_slow is not None:
-                                parts.append(f'Slowmode: {a_slow}s')
-                            detail = ' | '.join(parts)
-
-                        # ── Channel create/delete ────────────────────────────
-                        elif action_name in ('channel_create', 'channel_delete'):
-                            ch_type = getattr(aft, 'type', None) or getattr(bef, 'type', None)
-                            if ch_type:
-                                detail = str(ch_type).replace('_', ' ').title()
-
-                        # ── Server rename ────────────────────────────────────
-                        elif action_name == 'guild_update':
-                            b_name = getattr(bef, 'name', None)
-                            a_name = getattr(aft, 'name', None)
-                            if b_name and a_name and b_name != a_name:
-                                detail = f'{b_name} → {a_name}'
-
-                        # ── Message delete ───────────────────────────────────
-                        elif action_name in ('message_delete', 'message_bulk_delete'):
-                            extra = getattr(entry, 'extra', None)
-                            count = getattr(extra, 'count', 1)
-                            detail = f'{count} message(s)'
-
-                        # ── Ban ──────────────────────────────────────────────
-                        elif action_name == 'member_ban_add':
-                            detail = entry.reason or ''
-
-                        # ── Kick ─────────────────────────────────────────────
-                        elif action_name == 'member_kick':
-                            detail = entry.reason or ''
-
-                        # ── Invite ───────────────────────────────────────────
-                        elif action_name == 'invite_create':
-                            max_uses = getattr(entry.extra, 'max_uses', 0) if entry.extra else 0
-                            max_age  = getattr(entry.extra, 'max_age',  0) if entry.extra else 0
-                            parts = []
-                            parts.append(f'Max uses: {max_uses or "∞"}')
-                            if max_age:
-                                parts.append(f'Expires in: {max_age//3600}h' if max_age >= 3600 else f'{max_age//60}m')
-                            detail = ' | '.join(parts)
-
-                    except Exception as ex:
-                        print(f'[AuditDetail] {ex}', flush=True)
-
-                    entries.append({
-                        'action':     action_name,
-                        'target':     target,
-                        'moderator':  moderator,
-                        'reason':     entry.reason or '',
-                        'detail':     detail,
-                        'guild_id':   str(guild.id),
-                        'guild_name': guild.name,
-                        'timestamp':  entry.created_at.isoformat(),
-                        'entry_id':   str(entry.id),
-                    })
-                return entries
-
-            try:
-                # Return cached data IMMEDIATELY for fast response
-                cached = list(db.server_audit_log.find(
-                    {'guild_id': str(guild_id)}, {'_id': 0}
-                ).sort('timestamp', -1).limit(limit))
-
-                # Refresh cache in background (non-blocking)
-                import threading
-                def _refresh_cache():
-                    try:
-                        future  = asyncio.run_coroutine_threadsafe(_fetch(), _bot_ref.loop)
-                        fresh   = future.result(timeout=8)
-                        if fresh:
-                            col = db.server_audit_log
-                            for e in fresh:
-                                col.update_one({'entry_id': e['entry_id']}, {'$set': e}, upsert=True)
-                    except Exception as ex:
-                        print(f'[ServerAuditLog] Refresh failed: {ex}', flush=True)
-
-                if cached:
-                    # Return cached immediately, refresh in background
-                    threading.Thread(target=_refresh_cache, daemon=True).start()
-                    # Also merge with MongoDB join/leave events from AutoLogger
-                    mongo_events = list(get_db().audit_log.find(
-                        {'guild_id': str(guild_id), 'action': {'$in': ['join','leave','voice_join','voice_leave','voice_move']}},
-                        {'_id': 0}
-                    ).sort('timestamp', -1).limit(50))
-                    for d in mongo_events:
-                        if isinstance(d.get('timestamp'), datetime.datetime):
-                            d['timestamp'] = d['timestamp'].isoformat()
-                    all_entries = cached + mongo_events
-                    all_entries.sort(key=lambda x: x.get('timestamp',''), reverse=True)
-                    return jsonify({'entries': all_entries[:limit], 'source': 'cache_fast'})
-                else:
-                    # No cache yet — do a live fetch (first time only)
-                    future  = asyncio.run_coroutine_threadsafe(_fetch(), _bot_ref.loop)
-                    entries = future.result(timeout=8)
-                    if entries:
-                        col = db.server_audit_log
-                        for e in entries:
-                            col.update_one({'entry_id': e['entry_id']}, {'$set': e}, upsert=True)
-                        # Merge with join/leave from MongoDB
-                        mongo_events = list(get_db().audit_log.find(
-                            {'guild_id': str(guild_id), 'action': {'$in': ['join','leave','voice_join','voice_leave','voice_move']}},
-                            {'_id': 0}
-                        ).sort('timestamp', -1).limit(50))
-                        for d in mongo_events:
-                            if isinstance(d.get('timestamp'), datetime.datetime):
-                                d['timestamp'] = d['timestamp'].isoformat()
-                        all_entries = entries + mongo_events
-                        all_entries.sort(key=lambda x: x.get('timestamp',''), reverse=True)
-                        return jsonify({'entries': all_entries[:limit], 'source': 'discord_live'})
-            except Exception as ex:
-                print(f'[ServerAuditLog] Live fetch failed: {ex}', flush=True)
-
-    # Fall back to stored entries + MongoDB join/leave events
-    query = {'guild_id': str(guild_id)}
-    docs  = list(db.server_audit_log.find(query, {'_id': 0}).sort('timestamp', -1).limit(limit))
-    mongo_events = list(get_db().audit_log.find(
-        {'guild_id': str(guild_id), 'action': {'$in': ['join','leave','voice_join','voice_leave','voice_move']}},
-        {'_id': 0}
-    ).sort('timestamp', -1).limit(50))
-    for d in mongo_events:
-        if isinstance(d.get('timestamp'), datetime.datetime):
-            d['timestamp'] = d['timestamp'].isoformat()
-    combined = docs + mongo_events
-    combined.sort(key=lambda x: x.get('timestamp',''), reverse=True)
-    return jsonify({'entries': combined[:limit] if combined else [], 'source': 'mongodb_fallback'})
-
-# ══════════════════════════════════════════════════════════════
-#  ANTI-NUKE API
+#  SERVER BACKUP API
 # ══════════════════════════════════════════════════════════════
 
-AN_DEFAULTS = {
-    'ban':2,'kick':3,'channel_delete':2,'channel_create':5,
-    'role_delete':2,'role_create':5,'webhook_create':3,
-    'member_prune':1,'everyone_ping':2
-}
-
-@flask_app.route('/antinuke', methods=['GET','POST','OPTIONS'])
-def antinuke_api():
-    if flask_request.method == 'OPTIONS':
-        return _preflight()
+@flask_app.route('/backup/list', methods=['GET','OPTIONS'])
+def backup_list():
+    if flask_request.method == 'OPTIONS': return _preflight()
     auth = flask_request.headers.get('Authorization','')
-    if not auth.startswith('Bearer '):
-        return jsonify({'error':'Unauthorized'}),401
-
+    if not auth.startswith('Bearer '): return jsonify({'error':'Unauthorized'}),401
     guild_id = flask_request.args.get('guild_id')
-    if not guild_id:
-        return jsonify({'error':'guild_id required'}),400
+    if not guild_id: return jsonify({'error':'guild_id required'}),400
+    docs = list(get_db().server_backups.find(
+        {'guild_id': str(guild_id)},
+        {'_id':0, 'snapshot':0}   # exclude heavy snapshot from list
+    ).sort('created_at',-1).limit(20))
+    return jsonify({'backups': docs})
 
-    db = get_db()
 
-    if flask_request.method == 'GET':
-        doc = db.antinuke.find_one({'guild_id': str(guild_id)}, {'_id':0})
-        if not doc:
-            doc = {'guild_id':str(guild_id),'enabled':False,'punishment':'ban',
-                   'whitelist':[],'thresholds':dict(AN_DEFAULTS),'log_channel':None}
-        doc.setdefault('thresholds', dict(AN_DEFAULTS))
-        return jsonify(doc)
+@flask_app.route('/backup/create', methods=['POST','OPTIONS'])
+def backup_create():
+    if flask_request.method == 'OPTIONS': return _preflight()
+    auth = flask_request.headers.get('Authorization','')
+    if not auth.startswith('Bearer '): return jsonify({'error':'Unauthorized'}),401
+    data     = flask_request.get_json(silent=True) or {}
+    guild_id = data.get('guild_id')
+    label    = data.get('label', '')
+    if not guild_id: return jsonify({'error':'guild_id required'}),400
 
-    if flask_request.method == 'POST':
-        data = flask_request.get_json(silent=True) or {}
-        # Sanitize
-        cfg = {
-            'guild_id':   str(guild_id),
-            'enabled':    bool(data.get('enabled', False)),
-            'punishment': data.get('punishment','ban') if data.get('punishment') in ('ban','kick','strip') else 'ban',
-            'whitelist':  [str(uid) for uid in data.get('whitelist',[]) if str(uid).isdigit()],
-            'log_channel':str(data['log_channel']) if data.get('log_channel') else None,
-            'thresholds': {k: max(1,min(20,int(data.get('thresholds',{}).get(k,v))))
-                           for k,v in AN_DEFAULTS.items()},
+    if not _bot_ref or not _bot_ref.is_ready():
+        return jsonify({'error':'Bot not ready'}),503
+
+    guild = _bot_ref.get_guild(int(guild_id))
+    if not guild: return jsonify({'error':'Guild not found'}),404
+
+    from cogs.backup import _capture_guild
+    try:
+        snapshot  = _capture_guild(guild)
+        backup_id = f'{guild_id}_{int(datetime.datetime.utcnow().timestamp())}'
+        doc = {
+            'backup_id':     backup_id,
+            'guild_id':      str(guild_id),
+            'guild_name':    guild.name,
+            'label':         label or f'Backup {datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")}',
+            'created_at':    datetime.datetime.utcnow().isoformat(),
+            'role_count':    len(snapshot['roles']),
+            'channel_count': len(snapshot['text_channels']) + len(snapshot['voice_channels']),
+            'emoji_count':   len(snapshot['emojis']),
+            'member_count':  snapshot['member_count'],
+            'snapshot':      snapshot,
         }
-        db.antinuke.update_one({'guild_id':str(guild_id)},{'$set':cfg},upsert=True)
-        return jsonify({'success':True})
+        get_db().server_backups.insert_one(doc)
+        doc.pop('snapshot', None)
+        doc.pop('_id', None)
+        return jsonify({'success': True, 'backup': doc})
+    except Exception as ex:
+        return jsonify({'error': str(ex)}), 500
+
+
+@flask_app.route('/backup/restore', methods=['POST','OPTIONS'])
+def backup_restore():
+    if flask_request.method == 'OPTIONS': return _preflight()
+    auth = flask_request.headers.get('Authorization','')
+    if not auth.startswith('Bearer '): return jsonify({'error':'Unauthorized'}),401
+    data      = flask_request.get_json(silent=True) or {}
+    guild_id  = data.get('guild_id')
+    backup_id = data.get('backup_id')
+    if not guild_id or not backup_id:
+        return jsonify({'error':'guild_id and backup_id required'}),400
+
+    doc = get_db().server_backups.find_one({'backup_id': backup_id, 'guild_id': str(guild_id)})
+    if not doc: return jsonify({'error':'Backup not found'}),404
+
+    if not _bot_ref or not _bot_ref.is_ready():
+        return jsonify({'error':'Bot not ready'}),503
+    guild = _bot_ref.get_guild(int(guild_id))
+    if not guild: return jsonify({'error':'Guild not found'}),404
+
+    from cogs.backup import _restore_guild
+    async def _do_restore():
+        return await _restore_guild(guild, doc['snapshot'])
+    try:
+        future = asyncio.run_coroutine_threadsafe(_do_restore(), _bot_ref.loop)
+        logs   = future.result(timeout=120)
+        return jsonify({'success': True, 'log': logs, 'count': len(logs)})
+    except Exception as ex:
+        return jsonify({'error': str(ex)}), 500
+
+
+@flask_app.route('/backup/delete', methods=['POST','OPTIONS'])
+def backup_delete():
+    if flask_request.method == 'OPTIONS': return _preflight()
+    auth = flask_request.headers.get('Authorization','')
+    if not auth.startswith('Bearer '): return jsonify({'error':'Unauthorized'}),401
+    data      = flask_request.get_json(silent=True) or {}
+    guild_id  = data.get('guild_id')
+    backup_id = data.get('backup_id')
+    if not guild_id or not backup_id:
+        return jsonify({'error':'guild_id and backup_id required'}),400
+    res = get_db().server_backups.delete_one({'backup_id': backup_id, 'guild_id': str(guild_id)})
+    return jsonify({'success': res.deleted_count > 0})
+
+
+@flask_app.route('/backup/get', methods=['GET','OPTIONS'])
+def backup_get():
+    """Get full snapshot details for preview."""
+    if flask_request.method == 'OPTIONS': return _preflight()
+    auth = flask_request.headers.get('Authorization','')
+    if not auth.startswith('Bearer '): return jsonify({'error':'Unauthorized'}),401
+    guild_id  = flask_request.args.get('guild_id')
+    backup_id = flask_request.args.get('backup_id')
+    if not guild_id or not backup_id:
+        return jsonify({'error':'guild_id and backup_id required'}),400
+    doc = get_db().server_backups.find_one(
+        {'backup_id': backup_id, 'guild_id': str(guild_id)}, {'_id':0}
+    )
+    if not doc: return jsonify({'error':'Not found'}),404
+    # Return metadata + summary of snapshot (not full snapshot for performance)
+    snap = doc.get('snapshot', {})
+    doc['preview'] = {
+        'roles':    [r['name'] for r in snap.get('roles',[])],
+        'categories': [c['name'] for c in snap.get('categories',[])],
+        'text_channels':  [c['name'] for c in snap.get('text_channels',[])],
+        'voice_channels': [c['name'] for c in snap.get('voice_channels',[])],
+        'emojis':   [e['name'] for e in snap.get('emojis',[])],
+    }
+    doc.pop('snapshot', None)
+    return jsonify(doc)
+
+
+# ══════════════════════════════════════════════════════════════
+#  BOOSTER STATS
+# ══════════════════════════════════════════════════════════════
 
 @flask_app.route('/booster/stats', methods=['GET', 'OPTIONS'])
 def booster_stats():
@@ -1024,6 +811,7 @@ COGS = [
     "cogs.info",
     "cogs.moderation",
     "cogs.antinuke",
+    "cogs.backup",
 ]
 
 def make_bot():
@@ -1070,6 +858,16 @@ async def start_bot():
         async def on_ready():
             print(f"✅ Logged in as {bot.user} ({bot.user.id})", flush=True)
             print(f"📡 Connected to {len(bot.guilds)} server(s)", flush=True)
+            # Seed audit log with a startup entry so dashboard shows data immediately
+            for g in bot.guilds:
+                log_mod_action(
+                    action='bot_start',
+                    target=f'{bot.user}',
+                    moderator='System',
+                    reason=f'Bot connected to {len(bot.guilds)} servers',
+                    guild_id=str(g.id),
+                    guild_name=g.name
+                )
             try:
                 synced = await bot.tree.sync()
                 print(f"✅ Synced {len(synced)} global slash command(s)", flush=True)
