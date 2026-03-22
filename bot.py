@@ -633,30 +633,73 @@ def server_audit_log():
                 return entries
 
             try:
-                future  = asyncio.run_coroutine_threadsafe(_fetch(), _bot_ref.loop)
-                entries = future.result(timeout=10)
+                # Return cached data IMMEDIATELY for fast response
+                cached = list(db.server_audit_log.find(
+                    {'guild_id': str(guild_id)}, {'_id': 0}
+                ).sort('timestamp', -1).limit(limit))
 
-                # Store fresh entries in separate MongoDB collection (upsert by entry_id)
-                if entries:
-                    col = db.server_audit_log
-                    for e in entries:
-                        col.update_one(
-                            {'entry_id': e['entry_id']},
-                            {'$set': e},
-                            upsert=True
-                        )
-                    # Return fresh data
-                    return jsonify({'entries': entries, 'source': 'discord_live'})
+                # Refresh cache in background (non-blocking)
+                import threading
+                def _refresh_cache():
+                    try:
+                        future  = asyncio.run_coroutine_threadsafe(_fetch(), _bot_ref.loop)
+                        fresh   = future.result(timeout=8)
+                        if fresh:
+                            col = db.server_audit_log
+                            for e in fresh:
+                                col.update_one({'entry_id': e['entry_id']}, {'$set': e}, upsert=True)
+                    except Exception as ex:
+                        print(f'[ServerAuditLog] Refresh failed: {ex}', flush=True)
+
+                if cached:
+                    # Return cached immediately, refresh in background
+                    threading.Thread(target=_refresh_cache, daemon=True).start()
+                    # Also merge with MongoDB join/leave events from AutoLogger
+                    mongo_events = list(get_db().audit_log.find(
+                        {'guild_id': str(guild_id), 'action': {'$in': ['join','leave','voice_join','voice_leave','voice_move']}},
+                        {'_id': 0}
+                    ).sort('timestamp', -1).limit(50))
+                    for d in mongo_events:
+                        if isinstance(d.get('timestamp'), datetime.datetime):
+                            d['timestamp'] = d['timestamp'].isoformat()
+                    all_entries = cached + mongo_events
+                    all_entries.sort(key=lambda x: x.get('timestamp',''), reverse=True)
+                    return jsonify({'entries': all_entries[:limit], 'source': 'cache_fast'})
+                else:
+                    # No cache yet — do a live fetch (first time only)
+                    future  = asyncio.run_coroutine_threadsafe(_fetch(), _bot_ref.loop)
+                    entries = future.result(timeout=8)
+                    if entries:
+                        col = db.server_audit_log
+                        for e in entries:
+                            col.update_one({'entry_id': e['entry_id']}, {'$set': e}, upsert=True)
+                        # Merge with join/leave from MongoDB
+                        mongo_events = list(get_db().audit_log.find(
+                            {'guild_id': str(guild_id), 'action': {'$in': ['join','leave','voice_join','voice_leave','voice_move']}},
+                            {'_id': 0}
+                        ).sort('timestamp', -1).limit(50))
+                        for d in mongo_events:
+                            if isinstance(d.get('timestamp'), datetime.datetime):
+                                d['timestamp'] = d['timestamp'].isoformat()
+                        all_entries = entries + mongo_events
+                        all_entries.sort(key=lambda x: x.get('timestamp',''), reverse=True)
+                        return jsonify({'entries': all_entries[:limit], 'source': 'discord_live'})
             except Exception as ex:
                 print(f'[ServerAuditLog] Live fetch failed: {ex}', flush=True)
 
-    # Fall back to stored entries in MongoDB
+    # Fall back to stored entries + MongoDB join/leave events
     query = {'guild_id': str(guild_id)}
     docs  = list(db.server_audit_log.find(query, {'_id': 0}).sort('timestamp', -1).limit(limit))
-    if docs:
-        return jsonify({'entries': docs, 'source': 'mongodb_cache'})
-
-    return jsonify({'entries': [], 'source': 'empty'})
+    mongo_events = list(get_db().audit_log.find(
+        {'guild_id': str(guild_id), 'action': {'$in': ['join','leave','voice_join','voice_leave','voice_move']}},
+        {'_id': 0}
+    ).sort('timestamp', -1).limit(50))
+    for d in mongo_events:
+        if isinstance(d.get('timestamp'), datetime.datetime):
+            d['timestamp'] = d['timestamp'].isoformat()
+    combined = docs + mongo_events
+    combined.sort(key=lambda x: x.get('timestamp',''), reverse=True)
+    return jsonify({'entries': combined[:limit] if combined else [], 'source': 'mongodb_fallback'})
 
 # ══════════════════════════════════════════════════════════════
 #  BOOSTER STATS
