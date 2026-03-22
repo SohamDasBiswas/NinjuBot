@@ -380,7 +380,7 @@ def levels_leaderboard():
     return jsonify(result)
 
 # ══════════════════════════════════════════════════════════════
-#  AUDIT LOG (MongoDB — bot-logged events)
+#  AUDIT LOG (bot MongoDB — internal mod actions only)
 # ══════════════════════════════════════════════════════════════
 
 @flask_app.route('/audit/log', methods=['GET', 'OPTIONS'])
@@ -402,11 +402,27 @@ def audit_log():
 
 
 # ══════════════════════════════════════════════════════════════
-#  DISCORD NATIVE AUDIT LOG — real server events from Discord
+#  SERVER AUDIT LOG — Discord native, stored in separate collection
 # ══════════════════════════════════════════════════════════════
 
-@flask_app.route('/guild/audit-log', methods=['GET', 'OPTIONS'])
-def guild_audit_log():
+def _clean_name(val):
+    """Strip Discord IDs and #0 discriminator from display names."""
+    if not val:
+        return 'Unknown'
+    import re
+    val = re.sub(r'\s*\(\d{10,20}\)', '', str(val))
+    val = re.sub(r'#0$', '', val)
+    return val.strip() or 'Unknown'
+
+
+@flask_app.route('/server/audit-log', methods=['GET', 'OPTIONS'])
+def server_audit_log():
+    """
+    Fetches Discord's native server audit log.
+    - Tries the live bot (guild.audit_logs) for fresh data
+    - Stores results in a separate 'server_audit_log' MongoDB collection
+    - Falls back to stored entries if bot is unavailable
+    """
     if flask_request.method == 'OPTIONS':
         return _preflight()
     auth = flask_request.headers.get('Authorization', '')
@@ -418,56 +434,71 @@ def guild_audit_log():
 
     if not guild_id:
         return jsonify({'error': 'guild_id required'}), 400
-    if not _bot_ref or not _bot_ref.is_ready():
-        return jsonify({'error': 'Bot not ready'}), 503
 
-    guild = _bot_ref.get_guild(int(guild_id))
-    if not guild:
-        return jsonify({'error': 'Guild not found'}), 404
+    db = get_db()
 
-    async def _fetch():
-        entries = []
-        async for entry in guild.audit_logs(limit=limit):
-            action_name = str(entry.action).split('.')[-1].lower()
+    # Try live Discord audit log via bot
+    if _bot_ref and _bot_ref.is_ready():
+        guild = _bot_ref.get_guild(int(guild_id))
+        if guild:
+            async def _fetch():
+                entries = []
+                async for entry in guild.audit_logs(limit=limit):
+                    action_name = str(entry.action).split('.')[-1].lower()
+                    target = 'Unknown'
+                    try:
+                        t = entry.target
+                        if hasattr(t, 'display_name') and t.display_name:
+                            target = _clean_name(t.display_name)
+                        elif hasattr(t, 'name') and t.name:
+                            target = _clean_name(t.name)
+                        elif hasattr(t, 'code'):
+                            target = str(t.code)
+                    except Exception:
+                        pass
+                    moderator = 'System'
+                    try:
+                        if entry.user:
+                            moderator = _clean_name(entry.user.display_name or entry.user.name)
+                    except Exception:
+                        pass
+                    entries.append({
+                        'action':     action_name,
+                        'target':     target,
+                        'moderator':  moderator,
+                        'reason':     entry.reason or '',
+                        'guild_id':   str(guild.id),
+                        'guild_name': guild.name,
+                        'timestamp':  entry.created_at.isoformat(),
+                        'entry_id':   str(entry.id),
+                    })
+                return entries
 
-            # Clean target — name only, no IDs
-            target = 'Unknown'
             try:
-                t = entry.target
-                if hasattr(t, 'display_name') and t.display_name:
-                    target = t.display_name
-                elif hasattr(t, 'name') and t.name:
-                    target = t.name
-                elif hasattr(t, 'code'):
-                    target = t.code
-            except Exception:
-                pass
+                future  = asyncio.run_coroutine_threadsafe(_fetch(), _bot_ref.loop)
+                entries = future.result(timeout=10)
 
-            # Clean moderator — name only, no IDs
-            moderator = 'System'
-            try:
-                if entry.user:
-                    moderator = entry.user.display_name or entry.user.name or 'Unknown'
-            except Exception:
-                pass
+                # Store fresh entries in separate MongoDB collection (upsert by entry_id)
+                if entries:
+                    col = db.server_audit_log
+                    for e in entries:
+                        col.update_one(
+                            {'entry_id': e['entry_id']},
+                            {'$set': e},
+                            upsert=True
+                        )
+                    # Return fresh data
+                    return jsonify({'entries': entries, 'source': 'discord_live'})
+            except Exception as ex:
+                print(f'[ServerAuditLog] Live fetch failed: {ex}', flush=True)
 
-            entries.append({
-                'action':     action_name,
-                'target':     target,
-                'moderator':  moderator,
-                'reason':     entry.reason or '',
-                'guild_id':   str(guild.id),
-                'guild_name': guild.name,
-                'timestamp':  entry.created_at.isoformat(),
-            })
-        return entries
+    # Fall back to stored entries in MongoDB
+    query = {'guild_id': str(guild_id)}
+    docs  = list(db.server_audit_log.find(query, {'_id': 0}).sort('timestamp', -1).limit(limit))
+    if docs:
+        return jsonify({'entries': docs, 'source': 'mongodb_cache'})
 
-    try:
-        future  = asyncio.run_coroutine_threadsafe(_fetch(), _bot_ref.loop)
-        entries = future.result(timeout=10)
-        return jsonify({'entries': entries})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    return jsonify({'entries': [], 'source': 'empty'})
 
 # ══════════════════════════════════════════════════════════════
 #  BOOSTER STATS
