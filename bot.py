@@ -702,8 +702,51 @@ def server_audit_log():
     return jsonify({'entries': combined[:limit] if combined else [], 'source': 'mongodb_fallback'})
 
 # ══════════════════════════════════════════════════════════════
-#  BOOSTER STATS
+#  ANTI-NUKE API
 # ══════════════════════════════════════════════════════════════
+
+AN_DEFAULTS = {
+    'ban':2,'kick':3,'channel_delete':2,'channel_create':5,
+    'role_delete':2,'role_create':5,'webhook_create':3,
+    'member_prune':1,'everyone_ping':2
+}
+
+@flask_app.route('/antinuke', methods=['GET','POST','OPTIONS'])
+def antinuke_api():
+    if flask_request.method == 'OPTIONS':
+        return _preflight()
+    auth = flask_request.headers.get('Authorization','')
+    if not auth.startswith('Bearer '):
+        return jsonify({'error':'Unauthorized'}),401
+
+    guild_id = flask_request.args.get('guild_id')
+    if not guild_id:
+        return jsonify({'error':'guild_id required'}),400
+
+    db = get_db()
+
+    if flask_request.method == 'GET':
+        doc = db.antinuke.find_one({'guild_id': str(guild_id)}, {'_id':0})
+        if not doc:
+            doc = {'guild_id':str(guild_id),'enabled':False,'punishment':'ban',
+                   'whitelist':[],'thresholds':dict(AN_DEFAULTS),'log_channel':None}
+        doc.setdefault('thresholds', dict(AN_DEFAULTS))
+        return jsonify(doc)
+
+    if flask_request.method == 'POST':
+        data = flask_request.get_json(silent=True) or {}
+        # Sanitize
+        cfg = {
+            'guild_id':   str(guild_id),
+            'enabled':    bool(data.get('enabled', False)),
+            'punishment': data.get('punishment','ban') if data.get('punishment') in ('ban','kick','strip') else 'ban',
+            'whitelist':  [str(uid) for uid in data.get('whitelist',[]) if str(uid).isdigit()],
+            'log_channel':str(data['log_channel']) if data.get('log_channel') else None,
+            'thresholds': {k: max(1,min(20,int(data.get('thresholds',{}).get(k,v))))
+                           for k,v in AN_DEFAULTS.items()},
+        }
+        db.antinuke.update_one({'guild_id':str(guild_id)},{'$set':cfg},upsert=True)
+        return jsonify({'success':True})
 
 @flask_app.route('/booster/stats', methods=['GET', 'OPTIONS'])
 def booster_stats():
@@ -980,6 +1023,7 @@ COGS = [
     "cogs.currency",
     "cogs.info",
     "cogs.moderation",
+    "cogs.antinuke",
 ]
 
 def make_bot():
