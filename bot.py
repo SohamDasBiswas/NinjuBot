@@ -442,11 +442,31 @@ def server_audit_log():
         guild = _bot_ref.get_guild(int(guild_id))
         if guild:
             async def _fetch():
+                import discord as _discord
+
+                # Human-readable permission names
+                PERM_NAMES = {
+                    'administrator': 'Admin', 'manage_guild': 'Manage Server',
+                    'manage_roles': 'Manage Roles', 'manage_channels': 'Manage Channels',
+                    'kick_members': 'Kick', 'ban_members': 'Ban',
+                    'manage_messages': 'Manage Messages', 'mention_everyone': 'Mention Everyone',
+                    'moderate_members': 'Timeout Members', 'manage_nicknames': 'Manage Nicknames',
+                    'view_audit_log': 'View Audit Log', 'manage_webhooks': 'Manage Webhooks',
+                    'manage_expressions': 'Manage Emojis',
+                }
+
+                def perm_list(perms):
+                    if perms is None:
+                        return ''
+                    enabled = [PERM_NAMES.get(k, k.replace('_', ' ').title())
+                               for k, v in iter(perms) if v]
+                    return ', '.join(enabled[:6]) + (f' +{len(enabled)-6} more' if len(enabled) > 6 else '')
+
                 entries = []
                 async for entry in guild.audit_logs(limit=limit):
                     action_name = str(entry.action).split('.')[-1].lower()
 
-                    # Clean target name
+                    # Target name
                     target = 'Unknown'
                     try:
                         t = entry.target
@@ -459,7 +479,7 @@ def server_audit_log():
                     except Exception:
                         pass
 
-                    # Clean moderator name
+                    # Moderator name
                     moderator = 'System'
                     try:
                         if entry.user:
@@ -467,83 +487,143 @@ def server_audit_log():
                     except Exception:
                         pass
 
-                    # Extract meaningful detail from entry.changes
                     detail = ''
                     try:
-                        changes = entry.changes
-                        before  = changes.before
-                        after   = changes.after
+                        bef = entry.changes.before
+                        aft = entry.changes.after
 
-                        if action_name in ('member_role_update', 'role_update'):
-                            # Roles added to member
-                            added   = getattr(after,  'roles', []) or []
-                            removed = getattr(before, 'roles', []) or []
+                        # ── Role given/removed to a member ──────────────────
+                        if action_name == 'member_role_update':
+                            added   = getattr(aft, 'roles', []) or []
+                            removed = getattr(bef, 'roles', []) or []
                             parts = []
                             if added:
-                                parts.append('Added: ' + ', '.join(f'@{r.name}' for r in added))
+                                parts.append('➕ ' + ', '.join(f'@{r.name}' for r in added))
                             if removed:
-                                parts.append('Removed: ' + ', '.join(f'@{r.name}' for r in removed))
+                                parts.append('➖ ' + ', '.join(f'@{r.name}' for r in removed))
                             detail = ' | '.join(parts)
 
+                        # ── Member nick/role change ──────────────────────────
                         elif action_name == 'member_update':
                             parts = []
-                            b_nick = getattr(before, 'nick', None)
-                            a_nick = getattr(after,  'nick', None)
+                            b_nick = getattr(bef, 'nick', None)
+                            a_nick = getattr(aft, 'nick', None)
                             if b_nick != a_nick:
-                                parts.append(f'Nick: {b_nick or "none"} → {a_nick or "none"}')
-                            b_roles = getattr(before, 'roles', None)
-                            a_roles = getattr(after,  'roles', None)
-                            if a_roles is not None:
-                                added   = [r for r in (a_roles or []) if r not in (b_roles or [])]
-                                removed = [r for r in (b_roles or []) if r not in (a_roles or [])]
+                                parts.append(f'Nick: "{b_nick or "none"}" → "{a_nick or "none"}"')
+                            b_roles = getattr(bef, 'roles', None)
+                            a_roles = getattr(aft, 'roles', None)
+                            if a_roles is not None and b_roles is not None:
+                                added   = [r for r in a_roles if r not in b_roles]
+                                removed = [r for r in b_roles if r not in a_roles]
                                 if added:
                                     parts.append('Role added: ' + ', '.join(f'@{r.name}' for r in added))
                                 if removed:
                                     parts.append('Role removed: ' + ', '.join(f'@{r.name}' for r in removed))
+                            b_timed = getattr(bef, 'timed_out_until', None)
+                            a_timed = getattr(aft, 'timed_out_until', None)
+                            if a_timed and not b_timed:
+                                parts.append(f'Timed out until {a_timed.strftime("%Y-%m-%d %H:%M UTC")}')
+                            elif b_timed and not a_timed:
+                                parts.append('Timeout removed')
                             detail = ' | '.join(parts)
 
+                        # ── Role created ─────────────────────────────────────
+                        elif action_name == 'role_create':
+                            perms = getattr(aft, 'permissions', None)
+                            pl = perm_list(perms)
+                            detail = f'Permissions: {pl}' if pl else 'No special permissions'
+
+                        # ── Role deleted ─────────────────────────────────────
+                        elif action_name == 'role_delete':
+                            perms = getattr(bef, 'permissions', None)
+                            pl = perm_list(perms)
+                            detail = f'Had permissions: {pl}' if pl else ''
+
+                        # ── Role updated ─────────────────────────────────────
+                        elif action_name == 'role_update':
+                            parts = []
+                            b_name = getattr(bef, 'name', None)
+                            a_name = getattr(aft, 'name', None)
+                            if b_name and a_name and b_name != a_name:
+                                parts.append(f'Renamed: @{b_name} → @{a_name}')
+                            b_perms = getattr(bef, 'permissions', None)
+                            a_perms = getattr(aft, 'permissions', None)
+                            if a_perms and b_perms:
+                                gained = [PERM_NAMES.get(k, k) for k, v in iter(a_perms) if v and not getattr(b_perms, k, False)]
+                                lost   = [PERM_NAMES.get(k, k) for k, v in iter(b_perms) if v and not getattr(a_perms, k, False)]
+                                if gained:
+                                    parts.append('Gained: ' + ', '.join(gained))
+                                if lost:
+                                    parts.append('Lost: ' + ', '.join(lost))
+                            b_color = getattr(bef, 'colour', None)
+                            a_color = getattr(aft, 'colour', None)
+                            if b_color and a_color and str(b_color) != str(a_color):
+                                parts.append(f'Colour: {a_color}')
+                            detail = ' | '.join(parts)
+
+                        # ── Channel update ───────────────────────────────────
                         elif action_name == 'channel_update':
                             parts = []
-                            b_name = getattr(before, 'name', None)
-                            a_name = getattr(after,  'name', None)
+                            b_name = getattr(bef, 'name', None)
+                            a_name = getattr(aft, 'name', None)
                             if b_name and a_name and b_name != a_name:
                                 parts.append(f'#{b_name} → #{a_name}')
-                            b_topic = getattr(before, 'topic', None)
-                            a_topic = getattr(after,  'topic', None)
-                            if b_topic != a_topic and (b_topic or a_topic):
-                                parts.append(f'Topic changed')
+                                target = a_name  # update target to new name
+                            b_topic = getattr(bef, 'topic', None)
+                            a_topic = getattr(aft, 'topic', None)
+                            if b_topic != a_topic:
+                                parts.append('Topic updated')
+                            b_slow = getattr(bef, 'slowmode_delay', None)
+                            a_slow = getattr(aft, 'slowmode_delay', None)
+                            if b_slow != a_slow and a_slow is not None:
+                                parts.append(f'Slowmode: {a_slow}s')
                             detail = ' | '.join(parts)
 
+                        # ── Channel create/delete ────────────────────────────
+                        elif action_name in ('channel_create', 'channel_delete'):
+                            ch_type = getattr(aft, 'type', None) or getattr(bef, 'type', None)
+                            if ch_type:
+                                detail = str(ch_type).replace('_', ' ').title()
+
+                        # ── Server rename ────────────────────────────────────
                         elif action_name == 'guild_update':
-                            b_name = getattr(before, 'name', None)
-                            a_name = getattr(after,  'name', None)
+                            b_name = getattr(bef, 'name', None)
+                            a_name = getattr(aft, 'name', None)
                             if b_name and a_name and b_name != a_name:
                                 detail = f'{b_name} → {a_name}'
 
-                        elif action_name in ('role_create', 'role_delete', 'role_update'):
-                            role_name = getattr(after, 'name', None) or getattr(before, 'name', None)
-                            if role_name:
-                                detail = f'@{role_name}'
-
+                        # ── Message delete ───────────────────────────────────
                         elif action_name in ('message_delete', 'message_bulk_delete'):
-                            count = getattr(entry, 'extra', None)
-                            if hasattr(count, 'count'):
-                                detail = f'{count.count} message(s) deleted'
+                            extra = getattr(entry, 'extra', None)
+                            count = getattr(extra, 'count', 1)
+                            detail = f'{count} message(s)'
 
+                        # ── Ban ──────────────────────────────────────────────
                         elif action_name == 'member_ban_add':
                             detail = entry.reason or ''
 
-                    except Exception:
-                        pass
+                        # ── Kick ─────────────────────────────────────────────
+                        elif action_name == 'member_kick':
+                            detail = entry.reason or ''
 
-                    # Use detail as reason if no explicit reason given
-                    reason = entry.reason or detail
+                        # ── Invite ───────────────────────────────────────────
+                        elif action_name == 'invite_create':
+                            max_uses = getattr(entry.extra, 'max_uses', 0) if entry.extra else 0
+                            max_age  = getattr(entry.extra, 'max_age',  0) if entry.extra else 0
+                            parts = []
+                            parts.append(f'Max uses: {max_uses or "∞"}')
+                            if max_age:
+                                parts.append(f'Expires in: {max_age//3600}h' if max_age >= 3600 else f'{max_age//60}m')
+                            detail = ' | '.join(parts)
+
+                    except Exception as ex:
+                        print(f'[AuditDetail] {ex}', flush=True)
 
                     entries.append({
                         'action':     action_name,
                         'target':     target,
                         'moderator':  moderator,
-                        'reason':     reason,
+                        'reason':     entry.reason or '',
                         'detail':     detail,
                         'guild_id':   str(guild.id),
                         'guild_name': guild.name,
