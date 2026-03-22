@@ -387,7 +387,6 @@ def levels_leaderboard():
 def audit_log():
     if flask_request.method == 'OPTIONS':
         return _preflight()
-
     auth = flask_request.headers.get('Authorization', '')
     if not auth.startswith('Bearer '):
         return jsonify({'error': 'Unauthorized'}), 401
@@ -395,8 +394,6 @@ def audit_log():
     guild_id = flask_request.args.get('guild_id')
     limit    = min(int(flask_request.args.get('limit', 100)), 500)
     query    = {'guild_id': str(guild_id)} if guild_id else {}
-    # Exclude bot startup noise
-    query['action'] = {'$nin': ['bot_start', 'bot_stop', 'bot_restart', 'bot_connect', 'bot_ready']}
     docs     = list(get_db().audit_log.find(query, {'_id': 0}).sort('timestamp', -1).limit(limit))
     for d in docs:
         if isinstance(d.get('timestamp'), datetime.datetime):
@@ -405,14 +402,13 @@ def audit_log():
 
 
 # ══════════════════════════════════════════════════════════════
-#  DISCORD NATIVE AUDIT LOG (real server events from Discord)
+#  DISCORD NATIVE AUDIT LOG — real server events from Discord
 # ══════════════════════════════════════════════════════════════
 
 @flask_app.route('/guild/audit-log', methods=['GET', 'OPTIONS'])
 def guild_audit_log():
     if flask_request.method == 'OPTIONS':
         return _preflight()
-
     auth = flask_request.headers.get('Authorization', '')
     if not auth.startswith('Bearer '):
         return jsonify({'error': 'Unauthorized'}), 401
@@ -422,7 +418,6 @@ def guild_audit_log():
 
     if not guild_id:
         return jsonify({'error': 'guild_id required'}), 400
-
     if not _bot_ref or not _bot_ref.is_ready():
         return jsonify({'error': 'Bot not ready'}), 503
 
@@ -430,37 +425,29 @@ def guild_audit_log():
     if not guild:
         return jsonify({'error': 'Guild not found'}), 404
 
-    # Fetch Discord native audit logs from bot's async loop
     async def _fetch():
         entries = []
         async for entry in guild.audit_logs(limit=limit):
             action_name = str(entry.action).split('.')[-1].lower()
 
-            # Clean target name — no IDs
+            # Clean target — name only, no IDs
             target = 'Unknown'
             try:
                 t = entry.target
-                if hasattr(t, 'display_name'):
+                if hasattr(t, 'display_name') and t.display_name:
                     target = t.display_name
-                elif hasattr(t, 'name'):
+                elif hasattr(t, 'name') and t.name:
                     target = t.name
                 elif hasattr(t, 'code'):
-                    target = t.code  # invites
-                elif t is not None:
-                    target = str(t)
-                # Strip trailing (#0 discriminator for new usernames)
-                if target.endswith('#0'):
-                    target = target[:-2]
+                    target = t.code
             except Exception:
                 pass
 
-            # Clean moderator name — no IDs
-            moderator = 'Unknown'
+            # Clean moderator — name only, no IDs
+            moderator = 'System'
             try:
                 if entry.user:
-                    moderator = entry.user.display_name or entry.user.name
-                    if moderator.endswith('#0'):
-                        moderator = moderator[:-2]
+                    moderator = entry.user.display_name or entry.user.name or 'Unknown'
             except Exception:
                 pass
 
@@ -476,7 +463,7 @@ def guild_audit_log():
         return entries
 
     try:
-        future = asyncio.run_coroutine_threadsafe(_fetch(), _bot_ref.loop)
+        future  = asyncio.run_coroutine_threadsafe(_fetch(), _bot_ref.loop)
         entries = future.result(timeout=10)
         return jsonify({'entries': entries})
     except Exception as e:
