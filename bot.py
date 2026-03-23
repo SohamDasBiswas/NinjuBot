@@ -205,6 +205,7 @@ def auth_guilds():
                 'name':                     g['name'],
                 'icon':                     g.get('icon'),
                 'approximate_member_count': member_count,
+                'owner':                    g.get('owner', False),  # pass Discord's owner flag
             })
 
     return jsonify(result)
