@@ -71,7 +71,7 @@ async def tts_worker(state: TTSState):
 
         tmp_path = None
         try:
-            tts_obj = gTTS(text=text[:300], lang="en")
+            tts_obj = gTTS(text=text[:300], lang="hi", tld="co.in")
             with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
                 tmp_path = f.name
             await loop.run_in_executor(None, tts_obj.save, tmp_path)
