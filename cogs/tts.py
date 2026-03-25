@@ -166,13 +166,18 @@ class TTS(commands.Cog):
             0x2ECC71
         ))
 
-        # Connect to VC
+        # Force-kill any lingering VC first — prevents Discord 4017 error
+        existing_vc = ctx.guild.voice_client
+        if existing_vc:
+            try:
+                await existing_vc.disconnect(force=True)
+            except Exception:
+                pass
+            await asyncio.sleep(0.5)
+
+        # Connect fresh
         try:
-            if ctx.voice_client and ctx.voice_client.is_connected():
-                await ctx.voice_client.move_to(vc_channel)
-                vc = ctx.voice_client
-            else:
-                vc = await vc_channel.connect(timeout=10.0, reconnect=False)
+            vc = await vc_channel.connect(timeout=10.0, reconnect=False)
         except Exception as e:
             state.reset()   # clears connecting flag too
             return await ctx.send(embed=mk_embed(
