@@ -129,8 +129,17 @@ class TTS(commands.Cog):
         if state.enabled:
             return await ctx.send(embed=mk_embed("⚠️ Already On", "TTS is already running. Use `-tts off` to stop.", 0xF39C12))
 
-        # Join VC
         vc_channel = ctx.author.voice.channel
+
+        # Send the embed FIRST so it appears before the bot join notification
+        await ctx.send(embed=mk_embed(
+            "🔊 TTS Activated!",
+            f"Now reading **#{ctx.channel.name}** aloud in **{vc_channel.name}**.\n"
+            f"Use `-tts channel #otherchan` to change, or `-tts off` to stop.",
+            0x2ECC71
+        ))
+
+        # Join VC after sending embed
         try:
             if ctx.voice_client:
                 await ctx.voice_client.move_to(vc_channel)
@@ -144,13 +153,6 @@ class TTS(commands.Cog):
         state.text_channel = ctx.channel   # default: current text channel
         state.queue = asyncio.Queue()
         state.task = asyncio.create_task(tts_worker(state))
-
-        await ctx.send(embed=mk_embed(
-            "🔊 TTS Activated!",
-            f"Now reading **#{ctx.channel.name}** aloud in **{vc_channel.name}**.\n"
-            f"Use `-tts channel #otherchan` to change, or `-tts off` to stop.",
-            0x2ECC71
-        ))
 
     # ── -tts off ───────────────────────────────────────────────────────────────
 
