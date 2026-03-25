@@ -1,3 +1,17 @@
+import subprocess
+import sys
+
+# ── Auto-install PyNaCl if missing (required for voice) ───────
+try:
+    import nacl
+except ImportError:
+    print("⚠️  PyNaCl missing — installing now...", flush=True)
+    subprocess.check_call([
+        sys.executable, "-m", "pip", "install",
+        "--only-binary=:all:", "--quiet", "PyNaCl"
+    ])
+    print("✅ PyNaCl installed!", flush=True)
+
 import discord
 from discord.ext import commands
 import asyncio
