@@ -741,9 +741,9 @@ def economy_user():
         'losses':       data.get('losses', 0),
     })
 
-# # ══════════════════════════════════════════════════════════════
-# #  MINECRAFT BRIDGE
-# # ══════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════
+#  MINECRAFT BRIDGE — DISABLED
+# ══════════════════════════════════════════════════════════════
 
 # @flask_app.route('/minecraft/settings', methods=['GET', 'POST', 'OPTIONS'])
 # def minecraft_settings():
@@ -752,14 +752,14 @@ def economy_user():
 #     auth = flask_request.headers.get('Authorization', '')
 #     if not auth.startswith('Bearer '):
 #         return jsonify({'error': 'Unauthorized'}), 401
-
+#
 #     if flask_request.method == 'GET':
 #         guild_id = flask_request.args.get('guild_id')
 #         if not guild_id:
 #             return jsonify({'error': 'guild_id required'}), 400
 #         doc = get_db().minecraft_settings.find_one({'guild_id': str(guild_id)}, {'_id': 0})
 #         return jsonify({'settings': doc or {}})
-
+#
 #     # POST — save settings
 #     data     = flask_request.get_json(force=True) or {}
 #     guild_id = data.get('guild_id')
@@ -775,8 +775,8 @@ def economy_user():
 #         upsert=True
 #     )
 #     return jsonify({'success': True})
-
-
+#
+#
 # @flask_app.route('/minecraft/webhook', methods=['POST', 'OPTIONS'])
 # def minecraft_webhook():
 #     """
@@ -785,22 +785,22 @@ def economy_user():
 #     """
 #     if flask_request.method == 'OPTIONS':
 #         return _preflight()
-
+#
 #     data = flask_request.get_json(force=True) or {}
-
+#
 #     # Optional secret check — set MINECRAFT_WEBHOOK_SECRET in env
 #     secret = os.getenv('MINECRAFT_WEBHOOK_SECRET', '')
 #     if secret and data.get('secret') != secret:
 #         return jsonify({'error': 'Forbidden'}), 403
-
+#
 #     if not _bot_ref or not _bot_ref.is_ready():
 #         return jsonify({'error': 'Bot not ready'}), 503
-
+#
 #     # Find the Minecraft cog and call handle_webhook
 #     cog = _bot_ref.cogs.get('Minecraft')
 #     if not cog:
 #         return jsonify({'error': 'Minecraft cog not loaded'}), 500
-
+#
 #     future = asyncio.run_coroutine_threadsafe(
 #         cog.handle_webhook(data), _bot_ref.loop
 #     )
@@ -809,7 +809,7 @@ def economy_user():
 #     except Exception as e:
 #         print(f'[Minecraft webhook] Error: {e}', flush=True)
 #         return jsonify({'error': str(e)}), 500
-
+#
 #     return jsonify({'success': True})
 
 
@@ -887,7 +887,7 @@ COGS = [
     "cogs.backup",
     # ── New features ──────────────────────────────────────────
     "cogs.tts",         # Text-to-Speech for Discord voice channels
-    "cogs.minecraft",   # Minecraft ↔ Discord bridge + log watcher
+    # "cogs.minecraft",   # Minecraft ↔ Discord bridge + log watcher — DISABLED
 ]
 
 def make_bot():
