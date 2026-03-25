@@ -163,13 +163,13 @@ class TTS(commands.Cog):
                 # Wait for Discord to fully release the session before reconnecting
                 await asyncio.sleep(3.0)
 
-            # ── Step 2: Check PyNaCl before attempting connect ────────────────
+            # ── Step 2: Check PyNaCl is available ────────────────────────────
             try:
                 import nacl  # noqa: F401
             except ImportError:
                 return await ctx.send(embed=mk_embed(
-                    "❌ Missing Dependency",
-                    "PyNaCl is not installed. Run `pip install PyNaCl --upgrade` on your host and restart the bot.",
+                    "❌ Missing Library",
+                    "PyNaCl is not installed. Please redeploy with the updated Dockerfile.",
                     0xE74C3C))
 
             # ── Step 3: Connect fresh ─────────────────────────────────────────
