@@ -1,6 +1,6 @@
 FROM python:3.10-slim
 
-# System deps: ffmpeg for audio, libopus for voice, libsodium for PyNaCl
+# System libs required for PyNaCl and FFmpeg audio
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libopus0 \
@@ -14,10 +14,10 @@ WORKDIR /app
 
 COPY requirements.txt .
 
-# Install PyNaCl first using a pre-built wheel (no compilation needed)
-# This fixes the "nacl library needed for voice" error
+# Step 1: Install PyNaCl FIRST using a prebuilt wheel — this is what Discord voice needs
 RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir --only-binary=:all: PyNaCl \
+    && pip install --no-cache-dir "PyNaCl>=1.5.0" \
+    && python -c "import nacl; print('✅ PyNaCl OK:', nacl.__version__)" \
     && pip install --no-cache-dir -r requirements.txt
 
 COPY . .
