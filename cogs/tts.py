@@ -14,11 +14,11 @@ from gtts import gTTS
 class TTSState:
     def __init__(self):
         self.enabled      : bool                       = False
-        self.connecting   : bool                       = False   # guard against double -tts on
         self.voice_client : discord.VoiceClient | None = None
         self.text_channel : discord.TextChannel | None = None
         self.queue        : asyncio.Queue               = asyncio.Queue()
         self.task         : asyncio.Task | None         = None
+        self.lock         : asyncio.Lock                = asyncio.Lock()  # one connection at a time
 
     def is_alive(self) -> bool:
         return (
@@ -28,11 +28,10 @@ class TTSState:
         )
 
     def reset(self):
-        self.enabled    = False
-        self.connecting = False
+        self.enabled      = False
         self.voice_client = None
         self.text_channel = None
-        self.queue = asyncio.Queue()
+        self.queue        = asyncio.Queue()
         if self.task and not self.task.done():
             self.task.cancel()
         self.task = None
@@ -134,62 +133,58 @@ class TTS(commands.Cog):
 
         state = get_state(ctx.guild.id)
 
-        # Already fully running
+        # Already fully running — nothing to do
         if state.is_alive():
             return await ctx.send(embed=mk_embed(
                 "⚠️ Already On",
                 "TTS is already running. Use `-tts off` to stop.", 0xF39C12))
 
-        # Connection already in progress — ignore duplicate presses
-        if state.connecting:
-            return
+        # Lock — only ONE connection attempt at a time per guild
+        if state.lock.locked():
+            return  # silently ignore duplicate presses while connecting
 
-        # Stale state cleanup (enabled=True but VC is dead)
-        if state.enabled and not state.is_alive():
-            state.reset()
-            if ctx.voice_client:
+        async with state.lock:
+            # Re-check inside the lock in case another call just finished
+            if state.is_alive():
+                return await ctx.send(embed=mk_embed(
+                    "⚠️ Already On",
+                    "TTS is already running. Use `-tts off` to stop.", 0xF39C12))
+
+            vc_channel = ctx.author.voice.channel
+
+            # ── Step 1: Kill ANY existing voice connection on this guild ──────
+            existing = ctx.guild.voice_client
+            if existing:
                 try:
-                    await ctx.voice_client.disconnect(force=True)
+                    existing.stop()
+                    await existing.disconnect(force=True)
                 except Exception:
                     pass
+                # Wait for Discord to fully release the session before reconnecting
+                await asyncio.sleep(1.5)
 
-        vc_channel = ctx.author.voice.channel
+            # ── Step 2: Send embed (after cleanup, before join notification) ──
+            await ctx.send(embed=mk_embed(
+                "🔊 TTS Activated!",
+                f"Now reading **#{ctx.channel.name}** aloud in **{vc_channel.name}**.\n"
+                f"Use `-tts channel #otherchan` to change, or `-tts off` to stop.",
+                0x2ECC71
+            ))
 
-        # Lock against re-entry BEFORE any await
-        state.connecting = True
-
-        # Send embed first (appears before bot-join notification)
-        await ctx.send(embed=mk_embed(
-            "🔊 TTS Activated!",
-            f"Now reading **#{ctx.channel.name}** aloud in **{vc_channel.name}**.\n"
-            f"Use `-tts channel #otherchan` to change, or `-tts off` to stop.",
-            0x2ECC71
-        ))
-
-        # Force-kill any lingering VC first — prevents Discord 4017 error
-        existing_vc = ctx.guild.voice_client
-        if existing_vc:
+            # ── Step 3: Connect fresh ─────────────────────────────────────────
             try:
-                await existing_vc.disconnect(force=True)
-            except Exception:
-                pass
-            await asyncio.sleep(0.5)
+                vc = await vc_channel.connect(timeout=15.0, reconnect=False)
+            except Exception as e:
+                state.reset()
+                return await ctx.send(embed=mk_embed(
+                    "❌ Connect Failed", f"Could not join voice channel: {e}", 0xE74C3C))
 
-        # Connect fresh
-        try:
-            vc = await vc_channel.connect(timeout=10.0, reconnect=False)
-        except Exception as e:
-            state.reset()   # clears connecting flag too
-            return await ctx.send(embed=mk_embed(
-                "❌ Connect Failed", f"Could not join voice channel: {e}", 0xE74C3C))
-
-        # All good — commit state
-        state.voice_client = vc
-        state.text_channel = ctx.channel
-        state.queue        = asyncio.Queue()
-        state.enabled      = True
-        state.connecting   = False
-        state.task         = asyncio.create_task(tts_worker(state))
+            # ── Step 4: Commit state and start worker ─────────────────────────
+            state.voice_client = vc
+            state.text_channel = ctx.channel
+            state.queue        = asyncio.Queue()
+            state.enabled      = True
+            state.task         = asyncio.create_task(tts_worker(state))
 
     # ── -tts off ──────────────────────────────────────────────────────────────
 
@@ -197,14 +192,14 @@ class TTS(commands.Cog):
     async def tts_off(self, ctx: commands.Context):
         state = get_state(ctx.guild.id)
 
-        if not state.enabled and not state.connecting:
+        if not state.enabled and not state.lock.locked():
             return await ctx.send(embed=mk_embed(
                 "⚠️ Not Running", "TTS is not currently active.", 0xF39C12))
 
         if state.voice_client and state.voice_client.is_connected():
             try:
                 state.voice_client.stop()
-                await state.voice_client.disconnect()
+                await state.voice_client.disconnect(force=True)
             except Exception:
                 pass
 
@@ -253,7 +248,7 @@ class TTS(commands.Cog):
             f"**Queue:** {q_size} message(s) pending"
         ))
 
-    # ── on_message — enqueue spoken text ─────────────────────────────────────
+    # ── on_message — enqueue spoken text ──────────────────────────────────────
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -270,7 +265,6 @@ class TTS(commands.Cog):
         member = message.guild.get_member(message.author.id)
         if not member or not member.voice or not member.voice.channel:
             return
-        # Must be in the same VC as the bot
         if member.voice.channel.id != state.voice_client.channel.id:
             return
 
@@ -291,7 +285,6 @@ class TTS(commands.Cog):
     ):
         if member.id != self.bot.user.id:
             return
-        # Bot left a channel and didn't move to another
         if before.channel is not None and after.channel is None:
             state = get_state(member.guild.id)
             if state.enabled:
