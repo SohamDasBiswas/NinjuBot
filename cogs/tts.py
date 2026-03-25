@@ -161,7 +161,7 @@ class TTS(commands.Cog):
                 except Exception:
                     pass
                 # Wait for Discord to fully release the session before reconnecting
-                await asyncio.sleep(1.5)
+                await asyncio.sleep(3.0)
 
             # ── Step 2: Send embed (after cleanup, before join notification) ──
             await ctx.send(embed=mk_embed(
@@ -173,7 +173,7 @@ class TTS(commands.Cog):
 
             # ── Step 3: Connect fresh ─────────────────────────────────────────
             try:
-                vc = await vc_channel.connect(timeout=15.0, reconnect=False)
+                vc = await vc_channel.connect(timeout=15.0, reconnect=True)
             except Exception as e:
                 state.reset()
                 return await ctx.send(embed=mk_embed(
@@ -298,4 +298,4 @@ async def setup(bot: commands.Bot):
         print("[TTS] ⚠️  gTTS not installed — run: pip install gTTS", flush=True)
         return
     await bot.add_cog(TTS(bot))
-    print("✅ TTS cog loaded", flush=True)
+    # print("✅ TTS cog loaded", flush=True)

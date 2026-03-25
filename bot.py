@@ -885,8 +885,7 @@ COGS = [
     "cogs.moderation",
     "cogs.antinuke",
     "cogs.backup",
-    # ── New features ──────────────────────────────────────────
-    "cogs.tts",         # Text-to-Speech for Discord voice channels
+    "cogs.tts",
     # "cogs.minecraft",   # Minecraft ↔ Discord bridge + log watcher — DISABLED
 ]
 
