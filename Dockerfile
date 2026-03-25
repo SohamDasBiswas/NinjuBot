@@ -6,6 +6,8 @@ RUN apt-get update && apt-get install -y \
     libopus0 \
     libffi-dev \
     libnacl-dev \
+    libsodium-dev \
+    build-essential \
     git \
     libssl-dev \
     && apt-get clean \
@@ -14,7 +16,9 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir PyNaCl \
+    && pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
