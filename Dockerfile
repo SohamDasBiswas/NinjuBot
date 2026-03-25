@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y \
     libnacl-dev \
     libsodium-dev \
     build-essential \
-    PyNaCl \
+    python3-nacl \
     git \
     libssl-dev \
     && apt-get clean \
