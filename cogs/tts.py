@@ -163,13 +163,14 @@ class TTS(commands.Cog):
                 # Wait for Discord to fully release the session before reconnecting
                 await asyncio.sleep(3.0)
 
-            # ── Step 2: Send embed (after cleanup, before join notification) ──
-            await ctx.send(embed=mk_embed(
-                "🔊 TTS Activated!",
-                f"Now reading **#{ctx.channel.name}** aloud in **{vc_channel.name}**.\n"
-                f"Use `-tts channel #otherchan` to change, or `-tts off` to stop.",
-                0x2ECC71
-            ))
+            # ── Step 2: Check PyNaCl before attempting connect ────────────────
+            try:
+                import nacl  # noqa: F401
+            except ImportError:
+                return await ctx.send(embed=mk_embed(
+                    "❌ Missing Dependency",
+                    "PyNaCl is not installed. Run `pip install PyNaCl --upgrade` on your host and restart the bot.",
+                    0xE74C3C))
 
             # ── Step 3: Connect fresh ─────────────────────────────────────────
             try:
@@ -185,6 +186,14 @@ class TTS(commands.Cog):
             state.queue        = asyncio.Queue()
             state.enabled      = True
             state.task         = asyncio.create_task(tts_worker(state))
+
+            # ── Step 5: Send success embed ONLY after confirmed connect ────────
+            await ctx.send(embed=mk_embed(
+                "🔊 TTS Activated!",
+                f"Now reading **#{ctx.channel.name}** aloud in **{vc_channel.name}**.\n"
+                f"Use `-tts channel #otherchan` to change, or `-tts off` to stop.",
+                0x2ECC71
+            ))
 
     # ── -tts off ──────────────────────────────────────────────────────────────
 
