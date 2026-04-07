@@ -14,10 +14,10 @@ WORKDIR /app
 
 COPY requirements.txt .
 
-# Step 1: Install PyNaCl FIRST using a prebuilt wheel — this is what Discord voice needs
+# Install PyNaCl FIRST using a prebuilt wheel - required for Discord voice
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir "PyNaCl>=1.5.0" \
-    && python -c "import nacl; print('✅ PyNaCl OK:', nacl.__version__)" \
+    && python -c "import nacl.secret; print('PyNaCl OK:', nacl.__version__)" \
     && pip install --no-cache-dir -r requirements.txt
 
 COPY . .
