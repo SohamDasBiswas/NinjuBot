@@ -107,7 +107,7 @@ class AntiNuke(commands.Cog):
         if isinstance(user, discord.Member) and user.bot and str(user.id) in cfg['whitelist']:
             return
 
-        now = datetime.datetime.utcnow().timestamp()
+        now = datetime.datetime.now(datetime.timezone.utc).timestamp()
         threshold = cfg['thresholds'].get(action, DEFAULTS.get(action, 5))
 
         # Keep only events within the time window

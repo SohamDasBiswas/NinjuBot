@@ -35,7 +35,7 @@ print("🚀 NinjuBot starting...", flush=True)
 load_dotenv()
 init_db()
 
-from flask import Flask, jsonify, request as flask_request
+from flask import Flask, jsonify, request as flask_request, g
 from flask_cors import CORS
 from threading import Thread
 
@@ -87,7 +87,7 @@ def require_auth(f):
         auth = flask_request.headers.get('Authorization', '')
         if not auth.startswith('Bearer '):
             return jsonify({'error': 'Unauthorized'}), 401
-        flask_request.discord_token = auth.split(' ', 1)[1]
+        g.discord_token = auth.split(' ', 1)[1]
         return f(*args, **kwargs)
     return decorated
 
@@ -191,43 +191,43 @@ def auth_guilds():
     auth = flask_request.headers.get('Authorization', '')
     if not auth.startswith('Bearer '):
         return jsonify({'error': 'Unauthorized'}), 401
-    flask_request.discord_token = auth.split(' ', 1)[1]
+    g.discord_token = auth.split(' ', 1)[1]
 
     try:
-        user_guilds = discord_user_get('/users/@me/guilds', flask_request.discord_token)
+        user_guilds = discord_user_get('/users/@me/guilds', g.discord_token)
     except Exception as e:
         return jsonify({'error': f'Could not fetch guilds: {e}'}), 400
 
     # Get bot guild IDs — prefer live bot, fall back to Discord API
     if _bot_ref and _bot_ref.is_ready():
-        bot_guild_ids = {str(g.id) for g in _bot_ref.guilds}
+        bot_guild_ids = {str(guild.id) for guild in _bot_ref.guilds}
     else:
         bot_guilds_raw = bot_discord_get('/users/@me/guilds')
-        bot_guild_ids  = {g['id'] for g in bot_guilds_raw} if isinstance(bot_guilds_raw, list) else set()
+        bot_guild_ids  = {item['id'] for item in bot_guilds_raw} if isinstance(bot_guilds_raw, list) else set()
 
     ADMINISTRATOR = 0x8
     result = []
-    for g in user_guilds:
-        perms    = int(g.get('permissions', 0))
-        is_admin = bool(perms & ADMINISTRATOR) or g.get('owner', False)
-        if is_admin and g['id'] in bot_guild_ids:
+    for ug in user_guilds:
+        perms    = int(ug.get('permissions', 0))
+        is_admin = bool(perms & ADMINISTRATOR) or ug.get('owner', False)
+        if is_admin and ug['id'] in bot_guild_ids:
             # Try live bot cache first
             member_count = 0
             if _bot_ref and _bot_ref.is_ready():
-                bot_guild = _bot_ref.get_guild(int(g['id']))
+                bot_guild = _bot_ref.get_guild(int(ug['id']))
                 if bot_guild:
                     member_count = bot_guild.member_count or 0
             # If still 0, fetch directly from Discord API with bot token
             if member_count == 0:
-                guild_data = bot_discord_get(f'/guilds/{g["id"]}?with_counts=true')
+                guild_data = bot_discord_get(f'/guilds/{ug["id"]}?with_counts=true')
                 member_count = (guild_data.get('approximate_member_count')
                                 or guild_data.get('member_count') or 0)
             result.append({
-                'id':                       g['id'],
-                'name':                     g['name'],
-                'icon':                     g.get('icon'),
+                'id':                       ug['id'],
+                'name':                     ug['name'],
+                'icon':                     ug.get('icon'),
                 'approximate_member_count': member_count,
-                'owner':                    g.get('owner', False),  # pass Discord's owner flag
+                'owner':                    ug.get('owner', False),
             })
 
     return jsonify(result)
@@ -280,7 +280,7 @@ def get_settings():
     auth = flask_request.headers.get('Authorization', '')
     if not auth.startswith('Bearer '):
         return jsonify({'error': 'Unauthorized'}), 401
-    flask_request.discord_token = auth.split(' ', 1)[1]
+    g.discord_token = auth.split(' ', 1)[1]
     guild_id = flask_request.args.get('guild_id')
     if not guild_id:
         return jsonify({'error': 'guild_id required'}), 400
@@ -298,7 +298,7 @@ def update_settings():
     auth = flask_request.headers.get('Authorization', '')
     if not auth.startswith('Bearer '):
         return jsonify({'error': 'Unauthorized'}), 401
-    flask_request.discord_token = auth.split(' ', 1)[1]
+    g.discord_token = auth.split(' ', 1)[1]
     body     = flask_request.get_json(force=True) or {}
     guild_id = body.get('guild_id')
     settings = body.get('settings', {})
@@ -333,7 +333,7 @@ def economy_leaderboard():
     auth = flask_request.headers.get('Authorization', '')
     if not auth.startswith('Bearer '):
         return jsonify({'error': 'Unauthorized'}), 401
-    flask_request.discord_token = auth.split(' ', 1)[1]
+    g.discord_token = auth.split(' ', 1)[1]
 
     guild_id = flask_request.args.get('guild_id')
     scope    = flask_request.args.get('scope', 'server')  # 'server' or 'global'
@@ -364,7 +364,7 @@ def levels_leaderboard():
     auth = flask_request.headers.get('Authorization', '')
     if not auth.startswith('Bearer '):
         return jsonify({'error': 'Unauthorized'}), 401
-    flask_request.discord_token = auth.split(' ', 1)[1]
+    g.discord_token = auth.split(' ', 1)[1]
 
     guild_id = flask_request.args.get('guild_id')
     scope    = flask_request.args.get('scope', 'server')  # 'server' or 'global'
@@ -415,7 +415,7 @@ def audit_log():
     auth = flask_request.headers.get('Authorization', '')
     if not auth.startswith('Bearer '):
         return jsonify({'error': 'Unauthorized'}), 401
-    flask_request.discord_token = auth.split(' ', 1)[1]
+    g.discord_token = auth.split(' ', 1)[1]
     guild_id = flask_request.args.get('guild_id')
     limit    = min(int(flask_request.args.get('limit', 100)), 500)
     query    = {'guild_id': str(guild_id)} if guild_id else {}
@@ -462,13 +462,13 @@ def backup_create():
     from cogs.backup import _capture_guild
     try:
         snapshot  = _capture_guild(guild)
-        backup_id = f'{guild_id}_{int(datetime.datetime.utcnow().timestamp())}'
+        backup_id = f'{guild_id}_{int(datetime.datetime.now(datetime.timezone.utc).timestamp())}'
         doc = {
             'backup_id':     backup_id,
             'guild_id':      str(guild_id),
             'guild_name':    guild.name,
-            'label':         label or f'Backup {datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")}',
-            'created_at':    datetime.datetime.utcnow().isoformat(),
+            'label':         label or f'Backup {datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}',
+            'created_at':    datetime.datetime.now(datetime.timezone.utc).isoformat(),
             'role_count':    len(snapshot['roles']),
             'channel_count': len(snapshot['text_channels']) + len(snapshot['voice_channels']),
             'emoji_count':   len(snapshot['emojis']),
@@ -567,7 +567,7 @@ def booster_stats():
     auth = flask_request.headers.get('Authorization', '')
     if not auth.startswith('Bearer '):
         return jsonify({'error': 'Unauthorized'}), 401
-    flask_request.discord_token = auth.split(' ', 1)[1]
+    g.discord_token = auth.split(' ', 1)[1]
     guild_id = flask_request.args.get('guild_id')
     if not guild_id:
         return jsonify({'error': 'guild_id required'}), 400
@@ -601,7 +601,7 @@ def db_stats():
     auth = flask_request.headers.get('Authorization', '')
     if not auth.startswith('Bearer '):
         return jsonify({'error': 'Unauthorized'}), 401
-    flask_request.discord_token = auth.split(' ', 1)[1]
+    g.discord_token = auth.split(' ', 1)[1]
     try:
         db      = get_db()
         db_stat = db.command('dbStats')
@@ -612,7 +612,7 @@ def db_stats():
             'xp_entries':      db.xp.count_documents({}),
             'collections':     len(db.list_collection_names()),
             'total_documents': int(db_stat.get('objects', 0)),
-            'last_sync':       datetime.datetime.utcnow().strftime('%H:%M:%S UTC'),
+            'last_sync':       datetime.datetime.now(datetime.timezone.utc).strftime('%H:%M:%S UTC'),
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -870,7 +870,7 @@ def log_mod_action(action: str, target: str, moderator: str,
             'reason':     reason,
             'guild_id':   str(guild_id),
             'guild_name': guild_name,
-            'timestamp':  datetime.datetime.utcnow(),
+            'timestamp':  datetime.datetime.now(datetime.timezone.utc),
         })
     except Exception as e:
         print(f'[AuditLog] Failed to write: {e}', flush=True)

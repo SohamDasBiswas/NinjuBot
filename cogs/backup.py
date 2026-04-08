@@ -115,7 +115,7 @@ def _capture_guild(guild: discord.Guild) -> dict:
         'text_channels':     text_channels,
         'voice_channels':    voice_channels,
         'emojis':            emojis,
-        'created_at':        datetime.datetime.utcnow().isoformat(),
+        'created_at':        datetime.datetime.now(datetime.timezone.utc).isoformat(),
     }
 
 
@@ -305,13 +305,13 @@ class Backup(commands.Cog):
         msg = await ctx.send(embed=mk_embed('⏳ Creating Backup…', 'Capturing server state…', 0xFFA500))
         try:
             snapshot  = _capture_guild(ctx.guild)
-            backup_id = f'{ctx.guild.id}_{int(datetime.datetime.utcnow().timestamp())}'
+            backup_id = f'{ctx.guild.id}_{int(datetime.datetime.now(datetime.timezone.utc).timestamp())}'
             doc = {
                 'backup_id':     backup_id,
                 'guild_id':      str(ctx.guild.id),
                 'guild_name':    ctx.guild.name,
-                'label':         label or f'Backup {datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M")}',
-                'created_at':    datetime.datetime.utcnow().isoformat(),
+                'label':         label or f'Backup {datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M")}',
+                'created_at':    datetime.datetime.now(datetime.timezone.utc).isoformat(),
                 'role_count':    len(snapshot['roles']),
                 'channel_count': len(snapshot['text_channels']) + len(snapshot['voice_channels']),
                 'emoji_count':   len(snapshot['emojis']),
