@@ -205,7 +205,7 @@ class AntiNuke(commands.Cog):
         await asyncio.sleep(0.5)
         try:
             async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.ban):
-                if entry.target.id == user.id:
+                if entry.target and entry.target.id == user.id:
                     await self._check(guild, entry.user, 'ban')
                     return
         except Exception:
@@ -216,7 +216,7 @@ class AntiNuke(commands.Cog):
         await asyncio.sleep(0.5)
         try:
             async for entry in member.guild.audit_logs(limit=1, action=discord.AuditLogAction.kick):
-                if entry.target.id == member.id:
+                if entry.target and entry.target.id == member.id:
                     await self._check(member.guild, entry.user, 'kick')
                     return
         except Exception:
@@ -227,7 +227,7 @@ class AntiNuke(commands.Cog):
         await asyncio.sleep(0.5)
         try:
             async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_delete):
-                if entry.target.id == channel.id:
+                if entry.target and entry.target.id == channel.id:
                     await self._check(channel.guild, entry.user, 'channel_delete')
                     return
         except Exception:
@@ -245,7 +245,7 @@ class AntiNuke(commands.Cog):
         await asyncio.sleep(0.5)
         try:
             async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_create):
-                if entry.target.id == channel.id:
+                if entry.target and entry.target.id == channel.id:
                     await self._check(channel.guild, entry.user, 'channel_create')
                     return
         except Exception:
@@ -256,7 +256,7 @@ class AntiNuke(commands.Cog):
         await asyncio.sleep(0.5)
         try:
             async for entry in role.guild.audit_logs(limit=1, action=discord.AuditLogAction.role_delete):
-                if entry.target.id == role.id:
+                if entry.target and entry.target.id == role.id:
                     await self._check(role.guild, entry.user, 'role_delete')
                     return
         except Exception:
@@ -273,7 +273,7 @@ class AntiNuke(commands.Cog):
         await asyncio.sleep(0.5)
         try:
             async for entry in role.guild.audit_logs(limit=1, action=discord.AuditLogAction.role_create):
-                if entry.target.id == role.id:
+                if entry.target and entry.target.id == role.id:
                     await self._check(role.guild, entry.user, 'role_create')
                     return
         except Exception:
