@@ -14,6 +14,14 @@ except ImportError:
 
 import discord
 from discord.ext import commands
+
+# Load Opus - required for voice audio playback
+if not discord.opus.is_loaded():
+    try:
+        discord.opus.load_opus("libopus.so.0")
+        print("Opus loaded OK", flush=True)
+    except Exception as e:
+        print(f"WARNING: Could not load Opus: {e}", flush=True)
 import asyncio
 import os
 import datetime

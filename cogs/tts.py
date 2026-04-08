@@ -178,7 +178,7 @@ class TTS(commands.Cog):
             except Exception as e:
                 state.reset()
                 return await ctx.send(embed=mk_embed(
-                    "❌ Connect Failed", f"Could not join voice channel: {e}", 0xE74C3C))
+                    "❌ Connect Failed", f"Could not join voice channel: {type(e).__name__}: {e}", 0xE74C3C))
 
             # ── Step 4: Commit state and start worker ─────────────────────────
             state.voice_client = vc
