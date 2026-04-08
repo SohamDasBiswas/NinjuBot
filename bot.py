@@ -17,9 +17,8 @@ from discord.ext import commands
 
 # Load Opus - required for voice audio playback
 if not discord.opus.is_loaded():
-    import ctypes.util, glob
+    import ctypes.util, subprocess as _sp
     _opus_loaded = False
-    # 1. Try standard system path
     _lib = ctypes.util.find_library('opus')
     if _lib:
         try:
@@ -28,16 +27,17 @@ if not discord.opus.is_loaded():
             print(f"Opus loaded OK ({_lib})", flush=True)
         except Exception:
             pass
-    # 2. Search nix store (Replit)
     if not _opus_loaded:
-        for _path in glob.glob('/nix/store/*/lib/libopus.so*'):
-            try:
+        try:
+            _r = _sp.run(['find','/nix/store','-maxdepth','4','-name','libopus.so*','-print','-quit'],
+                capture_output=True, text=True, timeout=3)
+            _path = _r.stdout.strip()
+            if _path:
                 discord.opus.load_opus(_path)
                 _opus_loaded = True
                 print(f"Opus loaded OK ({_path})", flush=True)
-                break
-            except Exception:
-                pass
+        except Exception:
+            pass
     if not _opus_loaded:
         print("WARNING: Could not load Opus — voice will not work", flush=True)
 import asyncio
