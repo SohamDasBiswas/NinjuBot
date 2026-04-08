@@ -1,1 +1,10 @@
+modules = ["python-3.11"]
+
+[nix]
+channel = "stable-23_11"
+
 run = "python3 bot.py"
+
+[[ports]]
+localPort = 8080
+externalPort = 80

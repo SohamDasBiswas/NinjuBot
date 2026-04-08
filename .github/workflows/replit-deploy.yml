@@ -1,0 +1,31 @@
+name: Deploy to Replit
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Trigger Replit Redeploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Notify Replit to pull latest code
+        run: |
+          RESPONSE=$(curl -s -o /tmp/response.json -w "%{http_code}" \
+            -X POST "${{ secrets.REPLIT_URL }}/deploy" \
+            -H "X-Deploy-Secret: ${{ secrets.DEPLOY_SECRET }}" \
+            -H "Content-Type: application/json")
+
+          echo "HTTP Status: $RESPONSE"
+          echo "Response body:"
+          cat /tmp/response.json
+
+          if [ "$RESPONSE" != "200" ]; then
+            echo "❌ Deploy failed with status $RESPONSE"
+            exit 1
+          fi
+
+          echo "✅ Deploy triggered successfully"
