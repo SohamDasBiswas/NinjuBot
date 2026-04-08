@@ -17,11 +17,29 @@ from discord.ext import commands
 
 # Load Opus - required for voice audio playback
 if not discord.opus.is_loaded():
-    try:
-        discord.opus.load_opus("libopus.so.0")
-        print("Opus loaded OK", flush=True)
-    except Exception as e:
-        print(f"WARNING: Could not load Opus: {e}", flush=True)
+    import ctypes.util, glob
+    _opus_loaded = False
+    # 1. Try standard system path
+    _lib = ctypes.util.find_library('opus')
+    if _lib:
+        try:
+            discord.opus.load_opus(_lib)
+            _opus_loaded = True
+            print(f"Opus loaded OK ({_lib})", flush=True)
+        except Exception:
+            pass
+    # 2. Search nix store (Replit)
+    if not _opus_loaded:
+        for _path in glob.glob('/nix/store/*/lib/libopus.so*'):
+            try:
+                discord.opus.load_opus(_path)
+                _opus_loaded = True
+                print(f"Opus loaded OK ({_path})", flush=True)
+                break
+            except Exception:
+                pass
+    if not _opus_loaded:
+        print("WARNING: Could not load Opus — voice will not work", flush=True)
 import asyncio
 import os
 import datetime
@@ -845,6 +863,53 @@ def _preflight():
     res.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
     res.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
     return res
+
+# ── Deploy webhook (called by GitHub Actions on merge to main) ──
+import subprocess as _subprocess
+import threading as _threading
+import signal as _signal
+
+_deploy_lock = _threading.Lock()
+
+@flask_app.route('/deploy', methods=['POST'])
+def deploy():
+    secret   = flask_request.headers.get('X-Deploy-Secret', '')
+    expected = os.getenv('DEPLOY_SECRET', '')
+    if not expected or secret != expected:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    if not _deploy_lock.acquire(blocking=False):
+        return jsonify({'error': 'Deploy already in progress'}), 429
+
+    try:
+        pull = _subprocess.run(
+            ['git', 'pull', 'origin', 'main'],
+            capture_output=True, text=True,
+            cwd=os.path.dirname(os.path.abspath(__file__))
+        )
+        print(f"[Deploy] git pull: {pull.stdout.strip()}", flush=True)
+        if pull.returncode != 0:
+            return jsonify({'error': 'git pull failed', 'details': pull.stderr}), 500
+
+        response = jsonify({
+            'status': 'deploying',
+            'git_output': pull.stdout.strip(),
+        })
+
+        def do_restart():
+            import time
+            time.sleep(2)
+            print("[Deploy] Restarting...", flush=True)
+            _signal.raise_signal(_signal.SIGTERM)
+
+        _threading.Thread(target=do_restart, daemon=True).start()
+        return response
+
+    finally:
+        def release():
+            import time; time.sleep(15)
+            _deploy_lock.release()
+        _threading.Thread(target=release, daemon=True).start()
 
 # ══════════════════════════════════════════════════════════════
 #  PUBLIC HELPER — call from your cogs to log mod actions
