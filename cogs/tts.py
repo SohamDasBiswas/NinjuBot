@@ -1,5 +1,6 @@
 """
 cogs/tts.py  —  Text-to-Speech for Discord Voice Channels
+Fix: 4006 stale-session — force a clean WS handshake via bot.ws.voice_state_update
 """
 
 import asyncio
@@ -18,7 +19,7 @@ class TTSState:
         self.text_channel : discord.TextChannel | None = None
         self.queue        : asyncio.Queue               = asyncio.Queue()
         self.task         : asyncio.Task | None         = None
-        self.lock         : asyncio.Lock                = asyncio.Lock()  # one connection at a time
+        self.lock         : asyncio.Lock                = asyncio.Lock()
 
     def is_alive(self) -> bool:
         return (
@@ -49,6 +50,36 @@ def mk_embed(title: str, description: str = "", color: int = 0x7289DA) -> discor
     e = discord.Embed(title=title, description=description, color=color)
     e.set_footer(text="NinjuBot TTS")
     return e
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+async def _force_disconnect_voice(guild: discord.Guild) -> None:
+    """
+    Tear down every voice connection/session for this guild cleanly.
+    Sends a real WS VOICE_STATE_UPDATE with channel=null so Discord's
+    backend fully invalidates the old session before we reconnect.
+    """
+    existing = guild.voice_client
+    if existing:
+        try:
+            existing.stop()
+        except Exception:
+            pass
+        try:
+            await existing.disconnect(force=True)
+        except Exception:
+            pass
+
+    # Tell the gateway we have left — this resets the server-side session
+    try:
+        await guild.change_voice_state(channel=None)
+    except Exception:
+        pass
+
+    # Extra sleep to let Discord propagate the leave before we reconnect.
+    # 4006 happens when a NEW connect arrives before the OLD session is dead.
+    await asyncio.sleep(5.0)
 
 
 # ── TTS worker ────────────────────────────────────────────────────────────────
@@ -133,18 +164,15 @@ class TTS(commands.Cog):
 
         state = get_state(ctx.guild.id)
 
-        # Already fully running — nothing to do
         if state.is_alive():
             return await ctx.send(embed=mk_embed(
                 "⚠️ Already On",
                 "TTS is already running. Use `-tts off` to stop.", 0xF39C12))
 
-        # Lock — only ONE connection attempt at a time per guild
         if state.lock.locked():
-            return  # silently ignore duplicate presses while connecting
+            return  # duplicate press while connecting — silently ignore
 
         async with state.lock:
-            # Re-check inside the lock in case another call just finished
             if state.is_alive():
                 return await ctx.send(embed=mk_embed(
                     "⚠️ Already On",
@@ -152,18 +180,10 @@ class TTS(commands.Cog):
 
             vc_channel = ctx.author.voice.channel
 
-            # ── Step 1: Kill ANY existing voice connection on this guild ──────
-            existing = ctx.guild.voice_client
-            if existing:
-                try:
-                    existing.stop()
-                    await existing.disconnect(force=True)
-                except Exception:
-                    pass
-                # Wait for Discord to fully release the session before reconnecting
-                await asyncio.sleep(3.0)
+            # ── Step 1: Full clean disconnect (fixes 4006) ────────────────────
+            await _force_disconnect_voice(ctx.guild)
 
-            # ── Step 2: Check PyNaCl is available ────────────────────────────
+            # ── Step 2: Check PyNaCl ──────────────────────────────────────────
             try:
                 import nacl  # noqa: F401
             except ImportError:
@@ -172,13 +192,48 @@ class TTS(commands.Cog):
                     "PyNaCl is not installed. Please redeploy with the updated Dockerfile.",
                     0xE74C3C))
 
-            # ── Step 3: Connect fresh ─────────────────────────────────────────
+            # ── Step 3: Connect — single attempt with generous timeout ─────────
+            # We do NOT retry in a loop. Retrying reuses the same broken WS
+            # session and triggers 4006 again. One clean connect after the
+            # sleep above is enough.
+            vc = None
             try:
-                vc = await vc_channel.connect(timeout=15.0, reconnect=True)
+                vc = await vc_channel.connect(timeout=15.0, reconnect=False)
+            except discord.errors.ConnectionClosed as e:
+                code = getattr(e, 'code', None)
+                print(f"[TTS] connect failed — ConnectionClosed code={code}: {e}", flush=True)
+
+                if code == 4006:
+                    # Last resort: wait longer and try exactly once more
+                    await asyncio.sleep(8.0)
+                    try:
+                        await ctx.guild.change_voice_state(channel=None)
+                        await asyncio.sleep(3.0)
+                        vc = await vc_channel.connect(timeout=15.0, reconnect=False)
+                    except Exception as e2:
+                        state.reset()
+                        return await ctx.send(embed=mk_embed(
+                            "❌ Connect Failed",
+                            f"Discord rejected the connection (stale session). "
+                            f"Please wait 30 s and try again.\n`{e2}`",
+                            0xE74C3C))
+                else:
+                    state.reset()
+                    return await ctx.send(embed=mk_embed(
+                        "❌ Connect Failed",
+                        f"Could not join voice channel: `{type(e).__name__}: {e}`",
+                        0xE74C3C))
             except Exception as e:
                 state.reset()
                 return await ctx.send(embed=mk_embed(
-                    "❌ Connect Failed", f"Could not join voice channel: {type(e).__name__}: {e}", 0xE74C3C))
+                    "❌ Connect Failed",
+                    f"Could not join voice channel: `{type(e).__name__}: {e}`",
+                    0xE74C3C))
+
+            if vc is None:
+                state.reset()
+                return await ctx.send(embed=mk_embed(
+                    "❌ Connect Failed", "Unknown error joining voice channel.", 0xE74C3C))
 
             # ── Step 4: Commit state and start worker ─────────────────────────
             state.voice_client = vc
@@ -187,7 +242,6 @@ class TTS(commands.Cog):
             state.enabled      = True
             state.task         = asyncio.create_task(tts_worker(state))
 
-            # ── Step 5: Send success embed ONLY after confirmed connect ────────
             await ctx.send(embed=mk_embed(
                 "🔊 TTS Activated!",
                 f"Now reading **#{ctx.channel.name}** aloud in **{vc_channel.name}**.\n"
@@ -307,4 +361,3 @@ async def setup(bot: commands.Bot):
         print("[TTS] ⚠️  gTTS not installed — run: pip install gTTS", flush=True)
         return
     await bot.add_cog(TTS(bot))
-    # print("✅ TTS cog loaded", flush=True)

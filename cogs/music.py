@@ -28,6 +28,7 @@ def cache_set(key, value):
 
 # ── yt-dlp: try multiple formats in order ──────────────────
 def make_ytdl(cookiefile=None):
+    import shutil
     opts = {
         "quiet": True,
         "no_warnings": True,
@@ -41,10 +42,13 @@ def make_ytdl(cookiefile=None):
         "geo_bypass": True,
         "nocheckcertificate": True,
         "extractor_retries": 3,
-        # Broad format fallback chain — never fails
-        "format": "bestaudio/best"
-        # "format": "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio[ext=mp3]/bestaudio/best[height<=480]/best",
+        "format": "bestaudio/best",
     }
+    # Use Node.js runtime for yt-dlp (fixes YouTube JS extraction)
+    node_path = shutil.which("node")
+    if node_path:
+        opts["js_runtimes"] = {"node": {"path": node_path}}
+        opts["remote_components"] = {"ejs": {"url": "github"}}
     if cookiefile and os.path.exists(cookiefile):
         opts["cookiefile"] = cookiefile
     return yt_dlp.YoutubeDL(opts)
@@ -270,11 +274,42 @@ class Music(commands.Cog):
             await ctx.send(embed=mk_embed("❌ Playback Error", str(e), color=0xFF0000))
             await self.play_next(ctx)
 
+    async def _connect_with_retry(self, channel) -> discord.VoiceClient:
+        """Connect to a voice channel, retrying once on 4006 stale-session."""
+        # Tell Discord's gateway we're leaving any voice channel first,
+        # clearing stale sessions that cause 4006 on reconnect
+        try:
+            await channel.guild.change_voice_state(channel=None)
+            await asyncio.sleep(1.0)
+        except Exception:
+            pass
+
+        last_err: Exception = RuntimeError("unknown")
+        for attempt in range(3):
+            try:
+                return await channel.connect(timeout=12.0, reconnect=False, self_deaf=True)
+            except discord.errors.ConnectionClosed as e:
+                last_err = e
+                if getattr(e, 'code', None) == 4006 and attempt < 2:
+                    await asyncio.sleep(4 * (attempt + 1))
+                    continue
+                break
+            except Exception as e:
+                last_err = e
+                break
+        raise last_err
+
     async def ensure_voice(self, ctx):
         if not ctx.author.voice:
             await ctx.send(embed=mk_embed("❌ No Voice Channel", "Join a voice channel first!", color=0xFF0000)); return False
-        if not ctx.voice_client: await ctx.author.voice.channel.connect(timeout=8.0, reconnect=True, self_deaf=True)
-        elif ctx.voice_client.channel != ctx.author.voice.channel: await ctx.voice_client.move_to(ctx.author.voice.channel)
+        if not ctx.voice_client:
+            try:
+                await self._connect_with_retry(ctx.author.voice.channel)
+            except Exception as e:
+                await ctx.send(embed=mk_embed("❌ Connect Failed", f"Could not join voice channel: {e}", color=0xFF0000))
+                return False
+        elif ctx.voice_client.channel != ctx.author.voice.channel:
+            await ctx.voice_client.move_to(ctx.author.voice.channel)
         return True
 
     @commands.command(name="play", aliases=["p"])
@@ -413,19 +448,32 @@ class Music(commands.Cog):
     @discord.app_commands.command(name="play", description="Play a song with live suggestions")
     @discord.app_commands.describe(query="Song name or URL")
     async def slash_play(self, interaction: discord.Interaction, query: str):
+        # Defer immediately — gives us 15 minutes instead of 3 seconds
+        await interaction.response.defer()
+
         if not interaction.user.voice:
-            return await interaction.response.send_message(embed=mk_embed("❌ No Voice Channel", "Join a voice channel first!", color=0xFF0000), ephemeral=True)
+            return await interaction.followup.send(embed=mk_embed("❌ No Voice Channel", "Join a voice channel first!", color=0xFF0000), ephemeral=True)
+
+        # Connect to voice
         vc = interaction.guild.voice_client
-        if not vc: vc = await interaction.user.voice.channel.connect(timeout=8.0, reconnect=True, self_deaf=True)
-        elif vc.channel != interaction.user.voice.channel: await vc.move_to(interaction.user.voice.channel)
-        embed = discord.Embed(title="🔍 Loading...", description=f"```{query[:100]}```", color=0xf59e0b)
-        embed.set_footer(text="🎵 NinjuBot | Made by sdb_darkninja")
-        await interaction.response.send_message(embed=embed)
+        try:
+            if not vc:
+                vc = await self._connect_with_retry(interaction.user.voice.channel)
+            elif vc.channel != interaction.user.voice.channel:
+                await vc.move_to(interaction.user.voice.channel)
+        except Exception as e:
+            return await interaction.followup.send(embed=mk_embed("❌ Connect Failed", f"Could not join voice channel: {e}", color=0xFF0000))
+
+        await interaction.followup.send(embed=discord.Embed(
+            title="🔍 Searching...", description=f"```{query[:100]}```", color=0xf59e0b
+        ).set_footer(text="🎵 NinjuBot | Made by sdb_darkninja"))
+
         q = get_queue(interaction.guild.id)
         try:
             result = await asyncio.wait_for(resolve_source(query, self.bot.loop, self.session), timeout=20.0)
         except Exception as e:
             return await interaction.edit_original_response(embed=mk_embed("❌ Error", str(e)[:300], color=0xFF0000))
+
         q.add(result)
         class FakeCtx:
             def __init__(s, guild, voice_client, channel, bot): s.guild=guild; s.voice_client=voice_client; s.channel=channel; s.bot=bot

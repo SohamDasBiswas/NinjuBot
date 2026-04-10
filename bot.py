@@ -882,8 +882,13 @@ def deploy():
         return jsonify({'error': 'Deploy already in progress'}), 429
 
     try:
+        _subprocess.run(
+            ['git', 'config', 'pull.rebase', 'false'],
+            capture_output=True, text=True,
+            cwd=os.path.dirname(os.path.abspath(__file__))
+        )
         pull = _subprocess.run(
-            ['git', 'pull', 'origin', 'main'],
+            ['git', 'pull', 'origin', 'main', '--no-edit'],
             capture_output=True, text=True,
             cwd=os.path.dirname(os.path.abspath(__file__))
         )
@@ -900,14 +905,14 @@ def deploy():
             import time
             time.sleep(2)
             print("[Deploy] Restarting...", flush=True)
-            _signal.raise_signal(_signal.SIGTERM)
+            os._exit(0)
 
         _threading.Thread(target=do_restart, daemon=True).start()
         return response
 
     finally:
         def release():
-            import time; time.sleep(15)
+            import time; time.sleep(60)
             _deploy_lock.release()
         _threading.Thread(target=release, daemon=True).start()
 
@@ -948,10 +953,11 @@ def run_flask():
     port = int(os.environ.get("PORT", 10000))
     flask_app.run(host='0.0.0.0', port=port)
 
-t = Thread(target=run_flask)
-t.daemon = True
-t.start()
-print("✅ Flask thread started", flush=True)
+if __name__ == "__main__":
+    t = Thread(target=run_flask)
+    t.daemon = True
+    t.start()
+    print("✅ Flask thread started", flush=True)
 
 # ══════════════════════════════════════════════════════════════
 #  DISCORD BOT
@@ -1135,5 +1141,6 @@ async def start_bot():
             print(f"❌ Unexpected error: {type(e).__name__}: {e}", flush=True)
             await asyncio.sleep(60)
 
-print("▶️ Calling asyncio.run(start_bot())", flush=True)
-asyncio.run(start_bot())
+if __name__ == "__main__":
+    print("▶️ Calling asyncio.run(start_bot())", flush=True)
+    asyncio.run(start_bot())
