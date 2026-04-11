@@ -1,6 +1,6 @@
 """
 cogs/tts.py  —  Text-to-Speech for Discord Voice Channels
-Fix: 4006 stale-session — force a clean WS handshake via bot.ws.voice_state_update
+All voice connection logic lives in cogs/voice_utils.py
 """
 
 import asyncio
@@ -9,8 +9,8 @@ import tempfile
 import discord
 from discord.ext import commands
 from gtts import gTTS
+from cogs.voice_utils import safe_connect
 
-# ── Per-guild TTS state ────────────────────────────────────────────────────────
 
 class TTSState:
     def __init__(self):
@@ -51,38 +51,6 @@ def mk_embed(title: str, description: str = "", color: int = 0x7289DA) -> discor
     e.set_footer(text="NinjuBot TTS")
     return e
 
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-async def _force_disconnect_voice(guild: discord.Guild) -> None:
-    """
-    Tear down every voice connection/session for this guild cleanly.
-    Sends a real WS VOICE_STATE_UPDATE with channel=null so Discord's
-    backend fully invalidates the old session before we reconnect.
-    """
-    existing = guild.voice_client
-    if existing:
-        try:
-            existing.stop()
-        except Exception:
-            pass
-        try:
-            await existing.disconnect(force=True)
-        except Exception:
-            pass
-
-    # Tell the gateway we have left — this resets the server-side session
-    try:
-        await guild.change_voice_state(channel=None)
-    except Exception:
-        pass
-
-    # Extra sleep to let Discord propagate the leave before we reconnect.
-    # 4006 happens when a NEW connect arrives before the OLD session is dead.
-    await asyncio.sleep(5.0)
-
-
-# ── TTS worker ────────────────────────────────────────────────────────────────
 
 async def tts_worker(state: TTSState):
     loop = asyncio.get_event_loop()
@@ -136,8 +104,6 @@ async def tts_worker(state: TTSState):
                 pass
 
 
-# ── Cog ───────────────────────────────────────────────────────────────────────
-
 class TTS(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -154,8 +120,6 @@ class TTS(commands.Cog):
             "`-tts status` — Show TTS status"
         ))
 
-    # ── -tts on ───────────────────────────────────────────────────────────────
-
     @tts_group.command(name="on")
     async def tts_on(self, ctx: commands.Context):
         if not ctx.author.voice or not ctx.author.voice.channel:
@@ -170,7 +134,7 @@ class TTS(commands.Cog):
                 "TTS is already running. Use `-tts off` to stop.", 0xF39C12))
 
         if state.lock.locked():
-            return  # duplicate press while connecting — silently ignore
+            return
 
         async with state.lock:
             if state.is_alive():
@@ -180,62 +144,21 @@ class TTS(commands.Cog):
 
             vc_channel = ctx.author.voice.channel
 
-            # ── Step 1: Full clean disconnect (fixes 4006) ────────────────────
-            await _force_disconnect_voice(ctx.guild)
-
-            # ── Step 2: Check PyNaCl ──────────────────────────────────────────
             try:
                 import nacl  # noqa: F401
             except ImportError:
                 return await ctx.send(embed=mk_embed(
-                    "❌ Missing Library",
-                    "PyNaCl is not installed. Please redeploy with the updated Dockerfile.",
-                    0xE74C3C))
+                    "❌ Missing Library", "PyNaCl is not installed.", 0xE74C3C))
 
-            # ── Step 3: Connect — single attempt with generous timeout ─────────
-            # We do NOT retry in a loop. Retrying reuses the same broken WS
-            # session and triggers 4006 again. One clean connect after the
-            # sleep above is enough.
-            vc = None
             try:
-                vc = await vc_channel.connect(timeout=15.0, reconnect=False)
-            except discord.errors.ConnectionClosed as e:
-                code = getattr(e, 'code', None)
-                print(f"[TTS] connect failed — ConnectionClosed code={code}: {e}", flush=True)
-
-                if code == 4006:
-                    # Last resort: wait longer and try exactly once more
-                    await asyncio.sleep(8.0)
-                    try:
-                        await ctx.guild.change_voice_state(channel=None)
-                        await asyncio.sleep(3.0)
-                        vc = await vc_channel.connect(timeout=15.0, reconnect=False)
-                    except Exception as e2:
-                        state.reset()
-                        return await ctx.send(embed=mk_embed(
-                            "❌ Connect Failed",
-                            f"Discord rejected the connection (stale session). "
-                            f"Please wait 30 s and try again.\n`{e2}`",
-                            0xE74C3C))
-                else:
-                    state.reset()
-                    return await ctx.send(embed=mk_embed(
-                        "❌ Connect Failed",
-                        f"Could not join voice channel: `{type(e).__name__}: {e}`",
-                        0xE74C3C))
+                vc = await safe_connect(self.bot, vc_channel, self_deaf=False)
             except Exception as e:
                 state.reset()
                 return await ctx.send(embed=mk_embed(
                     "❌ Connect Failed",
-                    f"Could not join voice channel: `{type(e).__name__}: {e}`",
+                    f"`{type(e).__name__}: {e}`",
                     0xE74C3C))
 
-            if vc is None:
-                state.reset()
-                return await ctx.send(embed=mk_embed(
-                    "❌ Connect Failed", "Unknown error joining voice channel.", 0xE74C3C))
-
-            # ── Step 4: Commit state and start worker ─────────────────────────
             state.voice_client = vc
             state.text_channel = ctx.channel
             state.queue        = asyncio.Queue()
@@ -248,8 +171,6 @@ class TTS(commands.Cog):
                 f"Use `-tts channel #otherchan` to change, or `-tts off` to stop.",
                 0x2ECC71
             ))
-
-    # ── -tts off ──────────────────────────────────────────────────────────────
 
     @tts_group.command(name="off")
     async def tts_off(self, ctx: commands.Context):
@@ -270,8 +191,6 @@ class TTS(commands.Cog):
         await ctx.send(embed=mk_embed(
             "🔇 TTS Disabled", "Left voice channel and stopped TTS.", 0xE74C3C))
 
-    # ── -tts channel ──────────────────────────────────────────────────────────
-
     @tts_group.command(name="channel")
     async def tts_channel(self, ctx: commands.Context, channel: discord.TextChannel = None):
         state = get_state(ctx.guild.id)
@@ -283,8 +202,6 @@ class TTS(commands.Cog):
             ch_name = state.text_channel.mention if state.text_channel else "Not set"
             await ctx.send(embed=mk_embed("📢 TTS Channel", f"Currently reading: {ch_name}"))
 
-    # ── -tts skip ─────────────────────────────────────────────────────────────
-
     @tts_group.command(name="skip")
     async def tts_skip(self, ctx: commands.Context):
         state = get_state(ctx.guild.id)
@@ -293,8 +210,6 @@ class TTS(commands.Cog):
             await ctx.send(embed=mk_embed("⏭️ Skipped", "Skipped the current TTS message."))
         else:
             await ctx.send(embed=mk_embed("⚠️ Nothing Playing", "No TTS message is playing right now."))
-
-    # ── -tts status ───────────────────────────────────────────────────────────
 
     @tts_group.command(name="status")
     async def tts_status(self, ctx: commands.Context):
@@ -311,41 +226,27 @@ class TTS(commands.Cog):
             f"**Queue:** {q_size} message(s) pending"
         ))
 
-    # ── on_message — enqueue spoken text ──────────────────────────────────────
-
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if message.author.bot or not message.guild:
             return
-
         state = get_state(message.guild.id)
-
         if not state.is_alive() or not state.text_channel:
             return
         if message.channel.id != state.text_channel.id:
             return
-
         member = message.guild.get_member(message.author.id)
         if not member or not member.voice or not member.voice.channel:
             return
         if member.voice.channel.id != state.voice_client.channel.id:
             return
-
         content = message.clean_content
         if not content or content.startswith(("-", "/", "!")):
             return
-
         await state.queue.put(f"{member.display_name} says: {content}")
 
-    # ── Auto-cleanup if bot is kicked from VC ─────────────────────────────────
-
     @commands.Cog.listener()
-    async def on_voice_state_update(
-        self,
-        member: discord.Member,
-        before: discord.VoiceState,
-        after: discord.VoiceState
-    ):
+    async def on_voice_state_update(self, member, before, after):
         if member.id != self.bot.user.id:
             return
         if before.channel is not None and after.channel is None:

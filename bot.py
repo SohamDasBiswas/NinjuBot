@@ -49,7 +49,6 @@ from datetime import timezone
 from dotenv import load_dotenv
 from database import init_db, get_db
 
-print("🚀 NinjuBot starting...", flush=True)
 load_dotenv()
 init_db()
 
@@ -278,6 +277,7 @@ DEFAULT_SETTINGS = {
     'yt_alert_channel_id': '', 'yt_alert_message': '🔴 {channel} is live!',
     'tw_alerts': False, 'tw_username': '', 'tw_alert_channel_id': '',
     'tw_alert_message': '🎮 {channel} just went live!', 'tw_stats_vc': False, 'yt_stats_vc': False,
+    'tw_vc_followers': '', 'tw_vc_status': '', 'tw_vc_viewers': '', 'tw_vc_game': '',
     # Booster card
     'boost_enabled': True, 'boost_channel_id': '',
     'boost_message': '💎 {user} just boosted {server}!',
@@ -953,12 +953,6 @@ def run_flask():
     port = int(os.environ.get("PORT", 10000))
     flask_app.run(host='0.0.0.0', port=port)
 
-if __name__ == "__main__":
-    t = Thread(target=run_flask)
-    t.daemon = True
-    t.start()
-    print("✅ Flask thread started", flush=True)
-
 # ══════════════════════════════════════════════════════════════
 #  DISCORD BOT
 # ══════════════════════════════════════════════════════════════
@@ -1142,5 +1136,10 @@ async def start_bot():
             await asyncio.sleep(60)
 
 if __name__ == "__main__":
+    print("🚀 NinjuBot starting...", flush=True)
+    t = Thread(target=run_flask)
+    t.daemon = True
+    t.start()
+    print("✅ Flask thread started", flush=True)
     print("▶️ Calling asyncio.run(start_bot())", flush=True)
     asyncio.run(start_bot())

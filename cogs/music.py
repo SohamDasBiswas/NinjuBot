@@ -2,6 +2,7 @@ import discord
 from discord.ext import commands
 import yt_dlp
 import asyncio
+from cogs.voice_utils import safe_connect
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 import aiohttp
@@ -275,29 +276,8 @@ class Music(commands.Cog):
             await self.play_next(ctx)
 
     async def _connect_with_retry(self, channel) -> discord.VoiceClient:
-        """Connect to a voice channel, retrying once on 4006 stale-session."""
-        # Tell Discord's gateway we're leaving any voice channel first,
-        # clearing stale sessions that cause 4006 on reconnect
-        try:
-            await channel.guild.change_voice_state(channel=None)
-            await asyncio.sleep(1.0)
-        except Exception:
-            pass
-
-        last_err: Exception = RuntimeError("unknown")
-        for attempt in range(3):
-            try:
-                return await channel.connect(timeout=12.0, reconnect=False, self_deaf=True)
-            except discord.errors.ConnectionClosed as e:
-                last_err = e
-                if getattr(e, 'code', None) == 4006 and attempt < 2:
-                    await asyncio.sleep(4 * (attempt + 1))
-                    continue
-                break
-            except Exception as e:
-                last_err = e
-                break
-        raise last_err
+        """Delegate to shared voice utility."""
+        return await safe_connect(self.bot, channel, self_deaf=True)
 
     async def ensure_voice(self, ctx):
         if not ctx.author.voice:
